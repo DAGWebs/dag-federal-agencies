@@ -7,7 +7,7 @@ local warned = {}
 local METHODS = {
     'getPlayer', 'getIdentifier', 'getName', 'getJob', 'getMoney', 'addMoney',
     'removeMoney', 'getItemCount', 'addItem', 'removeItem', 'hasPermission',
-    'setDuty', 'createUseableItem', 'registerCallback'
+    'setDuty', 'setJob', 'createUseableItem', 'registerCallback'
 }
 
 local function finiteNumber(value)
@@ -188,6 +188,24 @@ end
 function Bridge.SetDuty(source, onDuty)
     if type(onDuty) ~= 'boolean' then return false end
     return call('setDuty', source, onDuty) == true
+end
+
+-- Changes the player's framework job. This is the one bridge write that hands
+-- out authority rather than money or items, so it verifies rather than trusts:
+-- the adapter's report is confirmed by re-reading the job, and a framework
+-- that cannot report jobs cannot set them either.
+function Bridge.SetJob(source, jobName, grade)
+    if type(jobName) ~= 'string' or jobName == '' then return false end
+    grade = tonumber(grade) or 0
+    if not finiteNumber(grade) or grade < 0 or grade % 1 ~= 0 then return false end
+
+    if call('setJob', source, jobName, grade) ~= true then return false end
+
+    -- An adapter that returned true without the job actually changing would
+    -- leave a boss believing they promoted someone who was never promoted.
+    local job = Bridge.GetJob(source)
+    if not job then return false end
+    return job.name == jobName and job.grade == grade
 end
 
 function Bridge.CreateUseableItem(item, callback)

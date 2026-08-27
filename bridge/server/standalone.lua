@@ -72,6 +72,15 @@ Bridge.RegisterAdapter('standalone', {
         player(source).job.onduty = onDuty
         publish(source)
         return true
+    end,
+    setJob = function(source, jobName, grade)
+        local job = player(source).job
+        job.name = jobName
+        job.label = jobName
+        job.grade = grade
+        job.grade_name = tostring(grade)
+        publish(source)
+        return true
     end
 })
 

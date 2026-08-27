@@ -91,5 +91,20 @@ Bridge.RegisterAdapter('ox', {
         local p = player(source)
         if not p then return false end
         return safe(function() p.set('dagOnDuty', onDuty, true) return true end) == true
+    end,
+    -- Ox Core has no jobs, only groups, so a "job change" is a move between
+    -- groups. The previous group is removed first: setting the new one alone
+    -- would leave the player holding both, and activeGroup() picks the highest
+    -- grade, so the old rank could keep winning.
+    setJob = function(source, jobName, grade)
+        local p = player(source)
+        if not p then return false end
+
+        local previous = activeGroup(p)
+        return safe(function()
+            if previous and previous ~= jobName then p.setGroup(previous, 0) end
+            p.setGroup(jobName, grade)
+            return true
+        end) == true
     end
 })

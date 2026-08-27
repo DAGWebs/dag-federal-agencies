@@ -65,6 +65,17 @@ Bridge.RegisterAdapter('esx', {
         if group == 'superadmin' then return true end
         return group ~= nil and group ~= 'user' and permission == group
     end,
+    -- ESX takes the grade as a string on most builds and returns nothing, so
+    -- like the money mutators this reports success by re-reading the job
+    -- rather than assuming the call landed.
+    setJob = function(source, jobName, grade)
+        local p = player(source)
+        if not p then return false end
+        p.setJob(jobName, tostring(grade))
+
+        local job = p.getJob()
+        return job ~= nil and job.name == jobName
+    end,
     createUseableItem = function(item, callback) core().RegisterUsableItem(item, callback) return true end,
     registerCallback = function(name, callback) core().RegisterServerCallback(name, callback) end
 })

@@ -253,13 +253,329 @@
         }
     });
 
+    /* Timed-action bar. Independent of the menu: it renders while the menu is
+       closed and never takes focus, because it is display only. */
+    var progressEl = document.getElementById('progress');
+    var progressLabel = document.getElementById('progressLabel');
+    var progressFill = document.getElementById('progressFill');
+    var progressHint = document.getElementById('progressHint');
+    var progressTimer = null;
+
+    function progressOpen(data) {
+        window.clearTimeout(progressTimer);
+        progressLabel.textContent = data.label || 'Working';
+        progressHint.hidden = !data.cancel;
+
+        progressEl.hidden = false;
+        progressFill.style.transition = 'none';
+        progressFill.style.width = '0%';
+
+        /* Two frames: one to apply the reset with no transition, one to start
+           the real one. Collapsing these makes the bar jump straight to full. */
+        requestAnimationFrame(function () {
+            progressEl.dataset.open = 'true';
+            requestAnimationFrame(function () {
+                progressFill.style.transition = 'width ' + (data.duration || 3000) + 'ms linear';
+                progressFill.style.width = '100%';
+            });
+        });
+    }
+
+    function progressClose() {
+        progressEl.dataset.open = 'false';
+        progressTimer = window.setTimeout(function () {
+            progressEl.hidden = true;
+            progressFill.style.transition = 'none';
+            progressFill.style.width = '0%';
+        }, 140);
+    }
+
+    /* Duty HUD. Renders from a single state push; the client sends a new one
+       whenever anything in it changes rather than on a timer. */
+    var hudEl = document.getElementById('hud');
+    var hudAgency = document.getElementById('hudAgency');
+    var hudCallsign = document.getElementById('hudCallsign');
+    var hudStatus = document.getElementById('hudStatus');
+    var hudRank = document.getElementById('hudRank');
+    var hudCallout = document.getElementById('hudCallout');
+    var hudCalloutNumber = document.getElementById('hudCalloutNumber');
+    var hudCalloutLabel = document.getElementById('hudCalloutLabel');
+    var hudObjectives = document.getElementById('hudObjectives');
+    var hudRestrained = document.getElementById('hudRestrained');
+
+    function hudRender(data) {
+        if (!data || !data.visible) {
+            hudEl.dataset.open = 'false';
+            hudEl.hidden = true;
+            return;
+        }
+
+        hudEl.hidden = false;
+        requestAnimationFrame(function () { hudEl.dataset.open = 'true'; });
+
+        hudAgency.textContent = data.agency || 'FED';
+        hudCallsign.textContent = data.callsign || '';
+        hudStatus.textContent = data.status || '';
+        hudStatus.dataset.tone = data.statusTone || 'success';
+        hudRank.textContent = data.rank || '';
+        hudRestrained.hidden = !data.restrained;
+
+        var callout = data.callout;
+        hudCallout.hidden = !callout;
+        if (!callout) return;
+
+        hudCalloutNumber.textContent = callout.number || '';
+        hudCalloutLabel.textContent = callout.label || '';
+        hudObjectives.innerHTML = '';
+
+        (callout.objectives || []).forEach(function (objective) {
+            var item = document.createElement('li');
+            item.className = 'hud__objective';
+            item.dataset.state = objective.state || 'pending';
+            item.textContent = objective.label || '';
+            hudObjectives.appendChild(item);
+        });
+    }
+
+    /* Mobile data terminal. Unlike the HUD and the progress bar this one takes
+       focus and input: it is the screen an officer reads rather than picks
+       from. All content is escaped -- every string in it was typed by a
+       player. */
+    var mdtEl = document.getElementById('mdt');
+    var mdtAgency = document.getElementById('mdtAgency');
+    var mdtTitle = document.getElementById('mdtTitle');
+    var mdtSubtitle = document.getElementById('mdtSubtitle');
+    var mdtTabsEl = document.getElementById('mdtTabs');
+    var mdtListEl = document.getElementById('mdtList');
+    var mdtDetailEl = document.getElementById('mdtDetail');
+    var mdtToolbar = document.getElementById('mdtToolbar');
+    var mdtSearch = document.getElementById('mdtSearch');
+    var mdtStatus = document.getElementById('mdtStatus');
+
+    var mdt = { open: false, data: {}, tab: null, selected: null, query: '' };
+
+    /* Which tabs exist, what they read, and how a row renders. Adding a tab is
+       a matter of adding an entry here and shipping the list from Lua. */
+    var MDT_TABS = [
+        { key: 'incidents', label: 'Incidents', search: true },
+        { key: 'warrants', label: 'Warrants' },
+        { key: 'bolos', label: 'BOLOs' },
+        { key: 'records', label: 'Records', search: true },
+        { key: 'evidence', label: 'Evidence' },
+        { key: 'leads', label: 'Leads' },
+        { key: 'reports', label: 'Reports' },
+        { key: 'units', label: 'Units' },
+        { key: 'custody', label: 'Custody' }
+    ];
+
+    function mdtRows(key) {
+        var rows = mdt.data[key];
+        return Array.isArray(rows) ? rows : [];
+    }
+
+    function mdtVisibleRows(key) {
+        var rows = mdtRows(key);
+        if (!mdt.query) return rows;
+
+        var needle = mdt.query.toLowerCase();
+        return rows.filter(function (row) {
+            return [row.title, row.meta, row.pill].some(function (field) {
+                return field && String(field).toLowerCase().indexOf(needle) !== -1;
+            });
+        });
+    }
+
+    function mdtRenderTabs() {
+        mdtTabsEl.innerHTML = '';
+        MDT_TABS.forEach(function (tab) {
+            if (!mdt.data[tab.key]) return;
+
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'mdt__tab';
+            button.dataset.tab = tab.key;
+            button.setAttribute('role', 'tab');
+            button.setAttribute('aria-selected', String(tab.key === mdt.tab));
+            button.innerHTML = '<span>' + escapeHtml(tab.label) + '</span>'
+                + '<span class="mdt__tabCount">' + mdtRows(tab.key).length + '</span>';
+            mdtTabsEl.appendChild(button);
+        });
+    }
+
+    function mdtRenderList() {
+        var definition = MDT_TABS.filter(function (tab) { return tab.key === mdt.tab; })[0] || {};
+        mdtToolbar.hidden = !definition.search;
+
+        var rows = mdtVisibleRows(mdt.tab);
+        mdtListEl.innerHTML = '';
+
+        if (!rows.length) {
+            var empty = document.createElement('li');
+            empty.className = 'mdt__empty';
+            empty.textContent = mdt.query ? 'Nothing matches.' : 'Nothing on file.';
+            mdtListEl.appendChild(empty);
+            return;
+        }
+
+        rows.forEach(function (row, index) {
+            var item = document.createElement('li');
+            item.className = 'mdt__row';
+            item.dataset.index = String(index);
+            item.setAttribute('aria-selected', String(index === mdt.selected));
+
+            var pill = row.pill
+                ? '<span class="mdt__pill' + (row.tone ? ' mdt__pill--' + escapeHtml(row.tone) : '') + '">'
+                    + escapeHtml(row.pill) + '</span>'
+                : '';
+
+            item.innerHTML = '<div class="mdt__rowTitle"><span>' + escapeHtml(row.title || '') + '</span>'
+                + pill + '</div>'
+                + (row.meta ? '<div class="mdt__rowMeta">' + escapeHtml(row.meta) + '</div>' : '');
+            mdtListEl.appendChild(item);
+        });
+    }
+
+    function mdtRenderDetail() {
+        var rows = mdtVisibleRows(mdt.tab);
+        var row = rows[mdt.selected];
+
+        if (!row) {
+            mdtDetailEl.innerHTML = '<div class="mdt__empty">Select an entry.</div>';
+            return;
+        }
+
+        var html = '<h2 class="mdt__h">' + escapeHtml(row.title || '') + '</h2>';
+        if (row.meta) html += '<p class="mdt__sub">' + escapeHtml(row.meta) + '</p>';
+
+        (row.sections || []).forEach(function (section) {
+            html += '<div class="mdt__section">' + escapeHtml(section.label || '') + '</div>';
+
+            (section.fields || []).forEach(function (field) {
+                html += '<div class="mdt__field"><span class="mdt__fieldLabel">'
+                    + escapeHtml(field.label || '') + '</span><span class="mdt__fieldValue">'
+                    + escapeHtml(field.value === undefined || field.value === null ? '' : field.value)
+                    + '</span></div>';
+            });
+
+            (section.notes || []).forEach(function (note) {
+                html += '<div class="mdt__note">'
+                    + (note.meta ? '<div class="mdt__noteMeta">' + escapeHtml(note.meta) + '</div>' : '')
+                    + escapeHtml(note.text || '') + '</div>';
+            });
+        });
+
+        if ((row.actions || []).length) {
+            html += '<div class="mdt__actions">';
+            row.actions.forEach(function (action, index) {
+                html += '<button type="button" class="mdt__action'
+                    + (action.tone === 'danger' ? ' mdt__action--danger' : '')
+                    + '" data-action="' + index + '">' + escapeHtml(action.label || '') + '</button>';
+            });
+            html += '</div>';
+        }
+
+        mdtDetailEl.innerHTML = html;
+    }
+
+    function mdtRender() {
+        mdtAgency.textContent = mdt.data.agency || 'FED';
+        mdtTitle.textContent = mdt.data.title || 'Mobile data terminal';
+        mdtSubtitle.textContent = mdt.data.subtitle || '';
+        mdtStatus.textContent = mdt.data.status || 'Ready';
+
+        mdtRenderTabs();
+        mdtRenderList();
+        mdtRenderDetail();
+    }
+
+    function mdtOpen(data) {
+        mdt.data = data || {};
+        mdt.open = true;
+
+        /* Keep the tab across a refresh so acting on a row does not throw the
+           officer back to the first tab. */
+        var available = MDT_TABS.filter(function (tab) { return mdt.data[tab.key]; });
+        if (!mdt.tab || !mdt.data[mdt.tab]) {
+            mdt.tab = available.length ? available[0].key : null;
+            mdt.selected = null;
+            mdt.query = '';
+            mdtSearch.value = '';
+        }
+
+        mdtEl.hidden = false;
+        requestAnimationFrame(function () { mdtEl.dataset.open = 'true'; });
+        mdtRender();
+    }
+
+    function mdtClose(notify) {
+        if (!mdt.open) return;
+        mdt.open = false;
+        mdtEl.dataset.open = 'false';
+        window.setTimeout(function () { if (!mdt.open) mdtEl.hidden = true; }, 140);
+        if (notify !== false) post('mdtClose', {});
+    }
+
+    mdtTabsEl.addEventListener('click', function (event) {
+        var tab = event.target.closest('.mdt__tab');
+        if (!tab) return;
+        mdt.tab = tab.dataset.tab;
+        mdt.selected = null;
+        mdt.query = '';
+        mdtSearch.value = '';
+        mdtRender();
+    });
+
+    mdtListEl.addEventListener('click', function (event) {
+        var row = event.target.closest('.mdt__row');
+        if (!row) return;
+        mdt.selected = Number(row.dataset.index);
+        mdtRenderList();
+        mdtRenderDetail();
+    });
+
+    mdtDetailEl.addEventListener('click', function (event) {
+        var button = event.target.closest('.mdt__action');
+        if (!button) return;
+
+        var row = mdtVisibleRows(mdt.tab)[mdt.selected];
+        var action = row && (row.actions || [])[Number(button.dataset.action)];
+        if (!action) return;
+
+        /* Handlers stay in Lua: the UI sends what was pressed and on which
+           record, never anything executable. */
+        post('mdtAction', { tab: mdt.tab, id: row.id, action: action.id });
+    });
+
+    mdtSearch.addEventListener('input', function () {
+        mdt.query = mdtSearch.value || '';
+        mdt.selected = null;
+        mdtRenderList();
+        mdtRenderDetail();
+    });
+
+    document.getElementById('mdtClose').addEventListener('click', function () { mdtClose(); });
+
+    document.addEventListener('keydown', function (event) {
+        if (!mdt.open) return;
+        if (event.key === 'Escape') { event.preventDefault(); mdtClose(); }
+    });
+
     window.addEventListener('message', function (event) {
         var data = event.data || {};
+        if (data.action === 'mdt:open') { mdtOpen(data.mdt); return; }
+        if (data.action === 'mdt:close') { mdtClose(false); return; }
+        if (data.action === 'hud') { hudRender(data.hud); return; }
         if (data.action === 'open') { applyTheme(data.theme); open(data.menu || {}); }
         else if (data.action === 'close') close(false);
         else if (data.action === 'theme') applyTheme(data.theme);
+        else if (data.action === 'progress:open') progressOpen(data);
+        else if (data.action === 'progress:close') progressClose();
     });
 
     // Exposed for the offline preview in tests/ui.
-    window.__dagMenu = { open: open, close: close, applyTheme: applyTheme, state: state };
+    window.__dagMenu = {
+        open: open, close: close, applyTheme: applyTheme, state: state,
+        progressOpen: progressOpen, progressClose: progressClose,
+        hudRender: hudRender, mdtOpen: mdtOpen, mdtClose: mdtClose, mdtState: mdt
+    };
 })();

@@ -1,10 +1,25 @@
-# DAG FiveM framework template
+# DAG federal agencies
 
-A resource-development SDK that works **alongside** Qbox, QBCore/QBus, ESX,
-legacy vRP, Ox Core, or framework-free FiveM. It does not replace the active
-framework and it never owns framework jobs, players, accounts, or inventories.
-Instead, it lets a job script, banking app, stock market, garage, or other
-resource call those framework features through one stable API.
+An advanced federal agencies job for FiveM: four agencies out of the box (FIB,
+IAA, DOA and the Secret Service), a per-agency CAD, multi-station facilities
+with locker rooms, armories, evidence labs and boss offices, in-game uniform
+and armory management, full LEO actions, multi-stage investigation callouts,
+and a configurable court process with an NPC judge and NPC jury.
+
+It runs **alongside** Qbox, QBCore/QBus, ESX, legacy vRP, Ox Core, or
+framework-free FiveM through the bundled bridge. It never owns framework jobs,
+players, accounts or inventories — your framework stays the authority on who a
+player is and what they have. Jump to [Federal agencies](#federal-agencies) for
+the job itself; the sections before it document the bridge and helpers it is
+built on, which are also usable on their own.
+
+## The bridge and helpers
+
+A resource-development SDK that works alongside every supported framework. It
+does not replace the active framework and it never owns framework jobs,
+players, accounts, or inventories. Instead, it lets a job script, banking app,
+stock market, garage, or other resource call those framework features through
+one stable API.
 
 The included menu, command, interaction, repository, and access helpers remove
 boilerplate from the resource you are building. They are deliberately generic;
@@ -12,15 +27,25 @@ there is no second job system, society system, or player database hidden here.
 
 ## Install
 
-1. Rename this directory for your resource and place it in `resources`.
+1. Place this directory in `resources` (rename it if you like — every command,
+   event and menu id is derived from the folder name).
 2. Ensure the framework (and `ox_inventory` for Qbox/Ox Core) before this resource.
-3. Add `ensure your-resource-name` to `server.cfg`.
-4. Delete the `<resource>:menu` and `<resource>:framework` demo commands in
-   `client/main.lua` and `server/main.lua` once you no longer need them.
-5. Start the server and read the capability line it prints (see below).
+3. Add `ensure dag-federal-agencies` to `server.cfg`.
+4. Create the framework jobs the agencies map to — `fib`, `iaa`, `doa` and
+   `usss` by default — with grades 0-5. Membership comes from the framework
+   job, so an agency with no matching job has no members.
+5. Grant yourself the editor ACE: `add_ace group.admin federal.admin allow`.
+6. Start the server and read the capability line it prints (see below).
+7. In game, run `/<resource>:fed` and use the editor to move the stations to
+   where your server actually wants them. The shipped coordinates are working
+   starting points, not a layout anyone should have to keep.
 
 No framework dependency is declared in the manifest, so standalone mode remains
 possible. If more than one core is running, `Config.FrameworkPriority` decides.
+
+The `<resource>:menu` and `<resource>:framework` commands in `client/main.lua`
+and `server/main.lua` are bridge diagnostics; delete them once you no longer
+need them.
 
 ## Unsupported operations return nil, not a plausible default
 
@@ -402,6 +427,289 @@ framework job grades, and members with per-action permissions. A job that
 cannot be read is a denial, never a match. Repository authorization is always
 server-side.
 
+## Federal agencies
+
+Everything below is the job itself. It is built entirely on the bridge above,
+so it works the same on every supported framework and standalone.
+
+### What ships configured
+
+| Agency | Job names | CAD prefix | Notes |
+| --- | --- | --- | --- |
+| Federal Investigation Bureau | `fib`, `fbi` | `FIB` | Two stations; shares records with the IAA |
+| International Affairs Agency | `iaa` | `IAA` | BOLOs disabled; shares records with the FIB |
+| Department of Alcohol & Firearms | `doa` | `DOA` | Firearms-focused callouts and armory |
+| United States Secret Service | `usss`, `secretservice` | `USSS` | Protective detail and counterfeiting work |
+
+Membership comes from the **framework job**, not from a table this resource
+owns. A player whose framework job is `fib` at grade 3 is a Supervisory Agent;
+promote them in your framework and their rank here follows. Add your server's
+own spelling to an agency's `jobs` list rather than renaming the agency.
+
+`DOA` was given as an acronym without an expansion — "Department of Alcohol &
+Firearms" is a guess. Change `label` in `federal/config/agencies.lua`, or
+rename it in game from the editor.
+
+### Ranks and permissions
+
+Each agency has a rank ladder keyed to the framework job grade. A rank carries
+a set of named permissions, and a permission that is not in
+`federal/shared/constants.lua` is rejected when the rank is saved — a typo'd
+`cad.wrtie` fails at the edit rather than silently denying every player.
+
+| Permission | Allows |
+| --- | --- |
+| `cad.view` / `cad.write` | Read the CAD / file and update incidents |
+| `cad.warrant` / `cad.expunge` | Issue and serve warrants / delete records |
+| `armory.use` / `armory.manage` | Draw equipment / change what is stocked |
+| `uniform.manage` | Create and edit uniforms |
+| `roster.manage` | Manage ranks and the duty roster |
+| `editor.manage` | Edit agencies, stations and zones in game |
+| `callout.manage` | Dispatch, reassign and cancel callouts |
+| `actions.detain` / `actions.search` | Cuff and escort / search suspects and vehicles |
+| `actions.arrest` / `actions.evidence` | Book arrests and fines / collect evidence |
+
+Two things override the ladder: the ACE permission in
+`Config.Federal.adminPermission` (`federal.admin` by default) allows
+everything, and reaching an agency's `bossGrade` grants the boss permissions
+whatever that rank happens to list — without that, a server that rewrites the
+ladder can end up with an agency nobody can administer.
+
+```cfg
+add_ace group.admin federal.admin allow
+```
+
+### Stations and zones
+
+An agency has any number of stations, and a station has any number of rooms.
+Each room is one of eight kinds, each with its own menu and its own grade gate:
+
+`duty` (clock on, set a callsign), `locker` (change into a uniform), `armory`
+(draw equipment), `evidence` (the lab), `cad` (the terminal), `boss` (command
+office), `cells` (booking and release), `garage` (motor pool).
+
+Zones are checked **server-side against the position the server reads for that
+player**, never against a coordinate the client sent. Standing at the sign-in
+desk is not standing in the evidence lab, and the default layouts keep every
+room further apart than `Config.Federal.zoneDistance` so one marker can never
+satisfy the check for another room.
+
+### The in-game editor
+
+Open it from the boss office or the main menu with `editor.manage`. The editor
+works by **standing where the thing belongs and pressing "place here"** — the
+server writes the position it reads for you, so what you see is what is stored.
+
+- Agencies: rename, retune, set job names and boss grade, create and delete
+- Stations: place, move (rooms come with it), delete
+- Rooms: place any of the eight kinds, set grade and radius, remove
+- Ranks: add, rename, toggle each permission, delete
+- Uniforms and armory: from the boss office (below)
+- Courthouses and courtroom seats: place and move (admin)
+
+Edits are stored in the resource's own store and **replace** the seeded config
+entry, so `federal/config/agencies.lua` is only ever a starting point. Deleting
+a seeded agency writes a tombstone so the config cannot resurrect it on the
+next restart. Every write is validated whole: a rejected edit changes nothing
+and reports why.
+
+Creating and deleting whole agencies, and editing courthouses, are admin
+actions — an agency nobody belongs to yet has no rank ladder that could
+authorize it.
+
+### Uniforms
+
+Uniforms belong to an agency and are managed by its boss, standing in the
+command office. The intended flow is **wear it, then save it**: get dressed
+however you want the uniform to look, then "Save my current outfit". The client
+captures the ped component slots and the server stores them against the agency.
+
+Each uniform carries a minimum grade and a body variant (`any`, `male`,
+`female`), and the locker room only offers the ones that fit the player. The
+uniforms in the config are placeholders built from low drawable indexes so they
+render as *something* on any server — replace them by re-capturing in game.
+
+### The CAD
+
+Each agency gets its own CAD, configured by its `cad` block: which modules are
+enabled, the case-number prefix, and which other agencies may read its records.
+
+- **Incidents** — numbered cases with charges, suspects, assigned officers and
+  a running narrative
+- **Warrants** — one active warrant per subject, visible force-wide (a warrant
+  only one agency can see is useless), served automatically on arrest
+- **BOLOs** — persons and vehicles; can be disabled per agency
+- **Citizen records** — arrests, fines and notes, keyed by framework identifier
+  so they follow the character rather than the session
+- **Evidence** — chain of custody, and a lab that must be stood in
+
+`shareWith` is a **read** grant and stays one: an IAA agent can read a FIB case
+and cannot write a word to it.
+
+Evidence is the part worth understanding. Collecting a DNA swab does not tell
+you whose it is — the subject is stored but hidden until the item is analysed
+at an evidence lab, and an identifying analysis only ever matches somebody who
+is **already on file**. That is what makes fingerprinting a suspect worth
+doing, and what ties the investigation loop together.
+
+### LEO actions
+
+Cuff and uncuff, escort, seat in a vehicle, search a suspect, search a vehicle,
+identify, fingerprint, take a DNA swab, book an arrest, issue a fine, release.
+
+Every action re-reads both players' real positions and re-checks the officer's
+rank on the server. The client supplies only a target id — never a distance,
+never an item list, never a "yes I am allowed" flag. Escorting requires the
+subject to be restrained first, and an arrest requires it too.
+
+Searching sweeps `Config.Federal.contraband`; found items are reported and,
+when `seizeOnSearch` is on, seized and filed as evidence tied to the subject
+they came from. On a framework whose adapter cannot read inventories the search
+**refuses and says so** rather than reporting an empty result, because an empty
+report reads as "the suspect is clean".
+
+### Investigation callouts
+
+A callout is a multi-stage case, not a waypoint. Officers attach to one, work
+its stages in order, and closing it files a real CAD incident carrying the
+evidence they collected.
+
+Stage kinds are `arrive`, `interview`, `evidence`, `search`, `arrest` and
+`report`. Progress is validated server-side against what actually happened:
+the `evidence` stage counts the records genuinely filed against the callout,
+and the `arrest` stage for a real suspect only closes on a real arrest.
+Naming a later objective does not skip ahead.
+
+The suspect is the interesting part. When `playerSuspects` is on, a **real
+player carrying an active warrant** becomes the subject of the investigation;
+with nobody warranted, an NPC is spawned instead. On-duty officers are never
+selected. This is what stops the warrants players write from being a dead end.
+
+The first officer to attach **hosts** the scene: their client spawns the
+suspect, the witnesses and the evidence markers, so exactly one machine owns
+them, and hosting passes on if they detach.
+
+```lua
+-- Dispatch by hand (needs callout.manage):
+/<resource>:fed:dispatch fib wire-fraud
+```
+
+### The court process
+
+Filed → arraignment → trial → deliberation → verdict → closed.
+
+**Who may file is a config list of job names, not an agency permission.** That
+is the extension point: `Config.Federal.court.filingJobs` already includes the
+four agencies plus `police` and `sheriff`, and adding your own job to that list
+is all it takes to let that job prosecute in the same system.
+
+```lua
+Config.Federal.court.filingJobs = { 'fib', 'iaa', 'doa', 'usss', 'police', 'sheriff', 'parkranger' }
+Config.Federal.court.judgeJobs  = { 'judge', 'justice' }
+Config.Federal.court.defenseJobs = { 'lawyer', 'attorney', 'publicdefender' }
+```
+
+Roles are judge, prosecution, defense, defendant, bailiff, juror and witness.
+**Any role nobody takes is filled by an NPC**, so a case is never blocked
+waiting for someone to log in:
+
+- **No judge online** → an NPC judge is appointed and runs the case on a timer,
+  entering a not-guilty plea for a defendant who never appeared and passing
+  sentence from the charge catalog. A real judge is never on a timer — they
+  move the case themselves, and taking the bench displaces the NPC.
+- **Short jury** → NPC jurors top it up to `jury.size`. They vote on the
+  **strength of the case**, which rises with admitted evidence (analysed
+  evidence counts for more, and an analysed item matching the defendant counts
+  for more again) and falls when a real player defends. Real jurors vote for
+  themselves; a real juror who never voted is not voted for.
+
+Sentencing comes from `Config.Federal.Charges`, keyed by the same charge text
+the CAD already stores, so a charge an officer wrote flows into sentencing
+without a second catalog to keep in sync. A judge may depart from the
+recommendation only within `sentencing.judgeDiscretion` — discretionary, not
+arbitrary. Unlisted charges fall back to `court.defaultCharge`.
+
+Arrests file a case automatically (`autoFileOnArrest`). Closing a case notes
+the citizen record, collects the fine, pays the players who took a role, and
+raises an event for a jail resource to act on — this resource decides the
+sentence and does not pretend to serve it:
+
+```lua
+AddEventHandler(('%s:dag:federal:sentenced'):format(GetCurrentResourceName()), function(sentence)
+    -- sentence: number, identifier, name, source, verdict, months, fine, charges
+end)
+```
+
+Set `Config.Federal.court.enabled = false` to turn the whole court off; arrests
+still book cleanly.
+
+### Commands
+
+| Command | Who | Does |
+| --- | --- | --- |
+| `/<resource>:fed` | Members | Open the main menu |
+| `/<resource>:fedcad` | `cad.view` | Open the CAD |
+| `/<resource>:fedcourt` | Anyone | Open the court docket |
+| `/<resource>:fed:duty` | Members | Toggle duty |
+| `/<resource>:fed:dispatch <agency> [template]` | `callout.manage` | Dispatch a callout |
+| `/<resource>:fed:status` | `federal.admin` | Agencies and who is on duty |
+| `/<resource>:fed:reload` | `federal.admin` | Rebuild registry and templates |
+
+Names are derived from the resource name, so two resources built from this
+template never fight over one.
+
+### Configuration map
+
+| Where | What |
+| --- | --- |
+| `config.lua` → `Config.Federal` | Global knobs: duty, distances, contraband, fines, callouts, court, motor pool |
+| `federal/config/agencies.lua` | The four agencies: stations, rooms, ranks, uniforms, armory |
+| `federal/config/callouts.lua` | Investigation templates and their stages |
+| `federal/config/court.lua` | Courthouses, courtroom seats and the charge catalog |
+
+All four are **defaults**. The in-game editor overrides every one of them, and
+those overrides win.
+
+### Layout
+
+```text
+federal/
+├── shared/
+│   ├── constants.lua      zone kinds, permissions, court roles, evidence kinds
+│   ├── util.lua           pure helpers: slugs, coords, clamping, deep merge
+│   └── schema.lua         normalizing validators for every editable record
+├── config/
+│   ├── agencies.lua       the four default agencies
+│   ├── callouts.lua       investigation templates
+│   └── court.lua          courthouses and the charge catalog
+├── server/
+│   ├── core.lua           registry, ranks, permission gates, duty, numbering
+│   ├── cad.lua            incidents, warrants, BOLOs, records, evidence
+│   ├── uniforms.lua       uniform CRUD and wearing
+│   ├── armory.lua         stock, drawing and the motor pool
+│   ├── actions.lua        every LEO action, authorized server-side
+│   ├── editor.lua         in-game editor endpoints
+│   ├── callouts.lua       the investigation engine
+│   ├── court.lua          the case lifecycle, NPC judge and jury
+│   └── commands.lua       server commands
+└── client/
+    ├── state.lua          cached context (never authority)
+    ├── uniforms.lua       outfit capture and apply
+    ├── actions.lua        targeting, restraint, action menus
+    ├── cad.lua            the CAD screens
+    ├── armory.lua         locker, armory, motor pool
+    ├── callouts.lua       scene hosting, NPCs, objectives
+    ├── court.lua          courtroom, roles, NPC judge and jury
+    ├── editor.lua         the in-game editor
+    ├── menus.lua          main menu, boss office, zone dispatch
+    ├── zones.lua          blips and interactions from the registry
+    └── bootstrap.lua      client entry point
+```
+
+Client files are listed explicitly in the manifest rather than globbed: a
+globbed directory loads alphabetically, which would put `actions` before
+`state` and `court` before `core`. A structural test enforces the order.
+
 ## What building alongside a framework looks like
 
 ### A job resource
@@ -473,17 +781,28 @@ stub, so the tests exercise the code the server runs rather than matching
 source text:
 
 ```bash
-lua5.4 tests/lua/run.lua              # 163 behavioural tests
+lua5.4 tests/lua/run.lua              # 321 behavioural tests
 python3 -m unittest discover -s tests # manifest/adapter/config invariants
 luacheck .                            # lint
 find . -name '*.lua' -not -path './.git/*' -print0 | xargs -0 -n1 luac5.4 -p
 ```
 
-`tests/lua/harness.lua` stubs the natives the template touches (resource state,
+`tests/lua/harness.lua` stubs the natives the resource touches (resource state,
 events, state bags, exports, storage files, markers, controls, NUI messages and
-focus). For the menu's appearance, open `tests/ui/preview.html` in a browser. Add a
-`tests/lua/spec_*.lua` file and register it in `tests/lua/run.lua` to cover new
-behaviour. All four commands run in CI on every push.
+focus, plus ped appearance, blips, entities and vehicles for the federal
+client). `harness.fixRandom` pins the dice so NPC juror votes are deterministic
+rather than flaky. For the menu's appearance, open `tests/ui/preview.html` in a
+browser. Add a `tests/lua/spec_*.lua` file and register it in
+`tests/lua/run.lua` to cover new behaviour. All four commands run in CI on
+every push.
+
+The federal specs cover the parts where a mistake is expensive: permission and
+duty gates, that a shared CAD grant stays read-only, that zone checks use the
+server's position rather than the client's claim, that evidence hides its
+subject until the lab runs it, that a callout stage cannot be skipped, and that
+the court reaches a verdict with an NPC judge and a part-NPC jury.
+`spec_federal_client.lua` loads the whole client stack in manifest order, which
+is what catches a file touching a native at load time.
 
 ## License
 

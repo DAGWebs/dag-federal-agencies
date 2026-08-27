@@ -123,6 +123,71 @@ class AdapterTests(unittest.TestCase):
                 )
 
 
+class FederalLayoutTests(unittest.TestCase):
+    """The federal modules are listed explicitly rather than globbed, because
+    they have a real load order: a globbed directory loads alphabetically,
+    which would put `actions` before `state` and `court` before `core`."""
+
+    def setUp(self):
+        self.sections = manifest_sections()
+
+    def test_shared_validators_load_before_the_catalogs_that_are_checked_by_them(self):
+        entries = self.sections["shared_scripts"]
+        for validator in ("federal/shared/constants.lua", "federal/shared/util.lua", "federal/shared/schema.lua"):
+            for catalog in ("federal/config/agencies.lua", "federal/config/callouts.lua", "federal/config/court.lua"):
+                self.assertLess(entries.index(validator), entries.index(catalog))
+
+    def test_schema_loads_after_the_constants_and_util_it_uses(self):
+        entries = self.sections["shared_scripts"]
+        self.assertLess(entries.index("federal/shared/constants.lua"), entries.index("federal/shared/schema.lua"))
+        self.assertLess(entries.index("federal/shared/util.lua"), entries.index("federal/shared/schema.lua"))
+
+    def test_server_core_loads_before_every_module_that_authorizes_through_it(self):
+        entries = self.sections["server_scripts"]
+        core = entries.index("federal/server/core.lua")
+        for module in ("cad", "uniforms", "armory", "actions", "editor", "callouts", "court", "commands"):
+            self.assertLess(core, entries.index(f"federal/server/{module}.lua"))
+
+    def test_client_state_loads_first_and_bootstrap_last(self):
+        entries = [entry for entry in self.sections["client_scripts"] if entry.startswith("federal/client/")]
+        self.assertEqual(entries[0], "federal/client/state.lua")
+        self.assertEqual(entries[-1], "federal/client/bootstrap.lua")
+
+    def test_federal_files_are_listed_explicitly_not_globbed(self):
+        for section in ("shared_scripts", "client_scripts", "server_scripts"):
+            for entry in self.sections[section]:
+                if entry.startswith("federal/"):
+                    self.assertNotIn("*", entry, f"{entry} is globbed; federal files have a load order")
+
+    def test_every_federal_file_on_disk_is_listed(self):
+        listed = {
+            entry
+            for section in ("shared_scripts", "client_scripts", "server_scripts")
+            for entry in self.sections[section]
+        }
+        for path in sorted(ROOT.glob("federal/**/*.lua")):
+            relative = path.relative_to(ROOT).as_posix()
+            self.assertIn(relative, listed, f"{relative} is not loaded by the manifest")
+
+    def test_client_code_never_reaches_for_a_server_only_module(self):
+        """Client and server both attach to DAG.Federal, and several names
+        (CAD, Actions, Court) exist on each side. They are separate Lua states,
+        so a client file reaching for a server-only module reads as working
+        code and is nil at runtime."""
+        server_only = ("DAG.Federal.Core", "DAG.Repository", "DAG.Storage", "DAG.Access")
+        for path in sorted(ROOT.glob("federal/client/*.lua")):
+            source = re.sub(r"--[^\n]*", "", path.read_text())
+            for name in server_only:
+                self.assertNotIn(name, source, f"{path.name} reads the server-only {name}")
+
+    def test_server_code_never_reaches_for_a_client_only_module(self):
+        client_only = ("DAG.Menu", "DAG.Interactions", "DAG.Federal.State")
+        for path in sorted(ROOT.glob("federal/server/*.lua")):
+            source = re.sub(r"--[^\n]*", "", path.read_text())
+            for name in client_only:
+                self.assertNotIn(name, source, f"{path.name} reads the client-only {name}")
+
+
 class ConventionTests(unittest.TestCase):
     def source_files(self):
         return {path: path.read_text() for path in ROOT.rglob("*.lua") if "tests" not in path.parts}

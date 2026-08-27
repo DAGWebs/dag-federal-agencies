@@ -2,14 +2,21 @@ fx_version 'cerulean'
 game 'gta5'
 
 author 'DAG'
-description 'Framework-agnostic FiveM resource template'
-version '1.1.0'
+description 'Framework-agnostic federal agencies job, CAD, investigations and court process'
+version '2.0.0'
 
 lua54 'yes'
 
 shared_scripts {
     'config.lua',
-    'bridge/shared.lua'
+    'bridge/shared.lua',
+    -- Vocabulary and validators, then the default catalogs that use them.
+    'federal/shared/constants.lua',
+    'federal/shared/util.lua',
+    'federal/shared/schema.lua',
+    'federal/config/agencies.lua',
+    'federal/config/callouts.lua',
+    'federal/config/court.lua'
 }
 
 client_scripts {
@@ -18,6 +25,20 @@ client_scripts {
     'modules/menu/client.lua',
     'modules/menu/nui.lua',
     'modules/interactions/client.lua',
+    -- Federal client. Listed in dependency order rather than globbed: state
+    -- must exist before the modules that read it, and bootstrap must be last
+    -- because it wires the others together.
+    'federal/client/state.lua',
+    'federal/client/uniforms.lua',
+    'federal/client/actions.lua',
+    'federal/client/cad.lua',
+    'federal/client/armory.lua',
+    'federal/client/callouts.lua',
+    'federal/client/court.lua',
+    'federal/client/editor.lua',
+    'federal/client/menus.lua',
+    'federal/client/zones.lua',
+    'federal/client/bootstrap.lua',
     'client/main.lua'
 }
 
@@ -36,5 +57,16 @@ server_scripts {
     'modules/commands/server.lua',
     'modules/access/server.lua',
     'modules/repository/server.lua',
+    -- Federal server. Core owns the registry and the permission gates, so it
+    -- loads before everything that authorizes through it.
+    'federal/server/core.lua',
+    'federal/server/cad.lua',
+    'federal/server/uniforms.lua',
+    'federal/server/armory.lua',
+    'federal/server/actions.lua',
+    'federal/server/editor.lua',
+    'federal/server/callouts.lua',
+    'federal/server/court.lua',
+    'federal/server/commands.lua',
     'server/main.lua'
 }

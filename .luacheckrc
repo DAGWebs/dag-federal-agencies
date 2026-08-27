@@ -19,12 +19,35 @@ read_globals = {
     -- server
     'GetPlayerIdentifierByType', 'GetPlayerIdentifiers', 'GetPlayerName',
     'GetPlayers', 'IsPlayerAceAllowed', 'Player', 'DropPlayer',
+    -- shared entity natives (server and client both have these)
+    'DoesEntityExist', 'GetEntityCoords', 'GetEntityHeading', 'GetPlayerPed',
+    'GetVehiclePedIsIn', 'NetworkGetEntityFromNetworkId',
     -- client
     'AddTextComponentSubstringPlayerName', 'BeginTextCommandDisplayHelp',
-    'DrawMarker', 'EndTextCommandDisplayHelp', 'GetEntityCoords',
+    'DrawMarker', 'EndTextCommandDisplayHelp',
     'RegisterNUICallback', 'SendNUIMessage', 'SetNuiFocus',
     'GetPlayerServerId', 'IsControlJustReleased', 'LocalPlayer', 'PlayerId',
     'PlayerPedId', 'vector3',
+    -- client: blips
+    'AddBlipForCoord', 'AddTextComponentString', 'BeginTextCommandSetBlipName',
+    'DoesBlipExist', 'EndTextCommandSetBlipName', 'RemoveBlip',
+    'SetBlipAsShortRange', 'SetBlipColour', 'SetBlipRoute', 'SetBlipScale',
+    'SetBlipSprite',
+    -- client: peds, models and animation
+    'ClearPedProp', 'ClearPedTasks', 'CreatePed', 'DeleteEntity',
+    'GetPedDrawableVariation', 'GetPedPaletteVariation', 'GetPedPropIndex',
+    'GetPedPropTextureIndex', 'GetPedTextureVariation', 'HasAnimDictLoaded',
+    'HasModelLoaded', 'IsEntityPlayingAnim', 'IsPedMale', 'RequestAnimDict',
+    'RequestModel', 'SetBlockingOfNonTemporaryEvents', 'SetEntityAsMissionEntity',
+    'SetModelAsNoLongerNeeded', 'SetPedArmour', 'SetPedComponentVariation',
+    'SetPedDiesWhenInjured', 'SetPedFleeAttributes', 'SetPedPropIndex',
+    'TaskPlayAnim', 'TaskStartScenarioInPlace',
+    -- client: players, vehicles and controls
+    'AttachEntityToEntity', 'CreateVehicle', 'DetachEntity',
+    'DisableControlAction', 'GetActivePlayers', 'GetClosestVehicle',
+    'GetHashKey', 'GetPlayerFromServerId', 'IsVehicleSeatFree',
+    'NetworkGetNetworkIdFromEntity', 'PlaySoundFrontend', 'SetEnableHandcuffs',
+    'SetPedIntoVehicle', 'SetVehicleNumberPlateText',
 }
 
 exclude_files = { 'tests/lua/vendor/**' }
@@ -39,7 +62,9 @@ files['fxmanifest.lua'] = {
 }
 
 files['tests/lua/**'] = {
-    globals = { 'harness' },
+    -- `math` is writable here on purpose: harness.fixRandom swaps math.random
+    -- so dice-driven behaviour (NPC juror votes) is deterministic under test.
+    globals = { 'harness', 'math' },
     read_globals = {
         'test',
         'assertDeepEq', 'assertEq', 'assertFalse', 'assertNil', 'assertThrows', 'assertTrue',

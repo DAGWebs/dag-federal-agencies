@@ -9,6 +9,19 @@ local function path(relative) return ROOT .. relative end
 
 harness.resourceName = 'dag-template'
 
+-- Anything that rolls a die (NPC juror votes, NPC model choice, which callout
+-- template fires) becomes deterministic under this. Restored by reset().
+local realRandom = math.random
+harness.realRandom = realRandom
+
+function harness.fixRandom(value)
+    math.random = function(lower, upper)
+        if lower and upper then return lower end
+        if lower then return 1 end
+        return value or 0.5
+    end
+end
+
 function harness.reset()
     harness.resourceStates = {}
     harness.files = {}
@@ -31,9 +44,36 @@ function harness.reset()
     harness.helpText = {}
     harness.controlsReleased = {}
     harness.playerCoords = nil
+    harness.peds = {}
+    harness.entityCoords = {}
+    harness.players = {}
+    harness.vehicles = {}
+    harness.networkEntities = {}
+    harness.headings = {}
+    harness.pedComponents = {}
+    harness.pedProps = {}
+    harness.pedIsMale = false
+    harness.pedArmour = 0
+    harness.handcuffed = false
+    harness.animDicts = {}
+    harness.playingAnim = nil
+    harness.scenarios = {}
+    harness.attachments = {}
+    harness.seated = {}
+    harness.sounds = {}
+    harness.models = {}
+    harness.spawnedPeds = {}
+    harness.spawnedVehicles = {}
+    harness.activePlayers = {}
+    harness.closestVehicle = nil
+    harness.blips = {}
+    harness.nextBlip = 0
+    harness.nextEntity = 5000
+    harness.lastBlipName = nil
     harness.localEvents = {}
     harness.commands = {}
     harness.waitBudget = nil
+    math.random = realRandom
     harness.nuiMessages = {}
     harness.nuiCallbacks = {}
     harness.nuiFocus = nil
@@ -67,6 +107,7 @@ function _G.GetResourceState(resource) return harness.resourceStates[resource] o
 function _G.GetGameTimer() return harness.gameTimer end
 
 harness.STOP = '__harness_stop__'
+
 
 -- Resource threads are `while true` loops. A wait budget lets a test run an
 -- exact number of iterations and then unwind via a sentinel error.
@@ -146,6 +187,19 @@ function _G.IsPlayerAceAllowed(playerSource, permission)
     return allowed ~= nil and (allowed == true or allowed[permission] == true)
 end
 
+function _G.GetPlayerPed(playerSource) return harness.peds[playerSource] or 0 end
+
+function _G.GetPlayers()
+    local list = {}
+    for _, playerSource in ipairs(harness.players) do list[#list + 1] = tostring(playerSource) end
+    return list
+end
+
+function _G.NetworkGetEntityFromNetworkId(netId) return harness.networkEntities[netId] or 0 end
+function _G.DoesEntityExist(entity) return entity ~= nil and entity ~= 0 end
+function _G.GetVehiclePedIsIn(ped) return harness.vehicles[ped] or 0 end
+function _G.GetEntityHeading(entity) return harness.headings[entity] or 0.0 end
+
 function _G.Player(playerSource)
     harness.stateBags[playerSource] = harness.stateBags[playerSource] or {}
     local bag = harness.stateBags[playerSource]
@@ -166,7 +220,9 @@ _G.LocalPlayer = { state = {} }
 function _G.PlayerId() return 1 end
 function _G.GetPlayerServerId() return 1 end
 function _G.PlayerPedId() return 1 end
-function _G.GetEntityCoords() return harness.playerCoords or vector3(0.0, 0.0, 0.0) end
+function _G.GetEntityCoords(entity)
+    return harness.entityCoords[entity] or harness.playerCoords or vector3(0.0, 0.0, 0.0)
+end
 function _G.DrawMarker(kind, x, y, z)
     table.insert(harness.drawnMarkers, { kind = kind, coords = vector3(x, y, z) })
 end
@@ -185,6 +241,87 @@ end
 function _G.SetNuiFocus(hasFocus, hasCursor)
     harness.nuiFocus = { focus = hasFocus, cursor = hasCursor }
 end
+
+-- Ped appearance, used by uniform capture and apply.
+function _G.IsPedMale() return harness.pedIsMale == true end
+function _G.GetPedDrawableVariation(_, slot) return (harness.pedComponents[slot] or {}).drawable or 0 end
+function _G.GetPedTextureVariation(_, slot) return (harness.pedComponents[slot] or {}).texture or 0 end
+function _G.GetPedPaletteVariation(_, slot) return (harness.pedComponents[slot] or {}).palette or 0 end
+function _G.GetPedPropIndex(_, slot) return (harness.pedProps[slot] or {}).drawable or -1 end
+function _G.GetPedPropTextureIndex(_, slot) return (harness.pedProps[slot] or {}).texture or 0 end
+
+function _G.SetPedComponentVariation(_, slot, drawable, texture, palette)
+    harness.pedComponents[slot] = { drawable = drawable, texture = texture, palette = palette }
+end
+function _G.SetPedPropIndex(_, slot, drawable, texture)
+    harness.pedProps[slot] = { drawable = drawable, texture = texture }
+end
+function _G.ClearPedProp(_, slot) harness.pedProps[slot] = nil end
+function _G.SetPedArmour(_, value) harness.pedArmour = value end
+
+-- Tasks, restraint and controls.
+function _G.SetEnableHandcuffs(_, enabled) harness.handcuffed = enabled end
+function _G.ClearPedTasks() end
+function _G.RequestAnimDict(dict) harness.animDicts[dict] = true end
+function _G.HasAnimDictLoaded(dict) return harness.animDicts[dict] == true end
+function _G.TaskPlayAnim(_, dict, name) harness.playingAnim = { dict = dict, name = name } end
+function _G.IsEntityPlayingAnim(_, dict, name)
+    return harness.playingAnim ~= nil and harness.playingAnim.dict == dict and harness.playingAnim.name == name
+end
+function _G.TaskStartScenarioInPlace(ped, scenario) harness.scenarios[ped] = scenario end
+function _G.DisableControlAction() end
+function _G.AttachEntityToEntity(entity, target) harness.attachments[entity] = target end
+function _G.DetachEntity(entity) harness.attachments[entity] = nil end
+function _G.SetPedIntoVehicle(ped, vehicle, seat) harness.seated[ped] = { vehicle = vehicle, seat = seat } end
+function _G.IsVehicleSeatFree() return true end
+function _G.PlaySoundFrontend(_, name) harness.sounds[#harness.sounds + 1] = name end
+
+-- Models and entities.
+function _G.GetHashKey(name) return name end
+function _G.RequestModel(model) harness.models[model] = true end
+function _G.HasModelLoaded(model) return harness.models[model] == true end
+function _G.SetModelAsNoLongerNeeded() end
+function _G.CreatePed(_, model, x, y, z, heading)
+    harness.nextEntity = harness.nextEntity + 1
+    harness.spawnedPeds[harness.nextEntity] = { model = model, coords = vector3(x, y, z), heading = heading }
+    return harness.nextEntity
+end
+function _G.CreateVehicle(model, x, y, z)
+    harness.nextEntity = harness.nextEntity + 1
+    harness.spawnedVehicles[harness.nextEntity] = { model = model, coords = vector3(x, y, z) }
+    return harness.nextEntity
+end
+function _G.SetVehicleNumberPlateText() end
+function _G.DeleteEntity(entity)
+    harness.spawnedPeds[entity] = nil
+    harness.spawnedVehicles[entity] = nil
+end
+function _G.SetEntityAsMissionEntity() end
+function _G.SetBlockingOfNonTemporaryEvents() end
+function _G.SetPedFleeAttributes() end
+function _G.SetPedDiesWhenInjured() end
+function _G.GetActivePlayers() return harness.activePlayers end
+function _G.GetPlayerFromServerId(serverId) return serverId end
+function _G.GetClosestVehicle() return harness.closestVehicle or 0 end
+function _G.NetworkGetNetworkIdFromEntity(entity) return entity end
+
+-- Blips. Held in a table so a test can assert what was drawn and that a
+-- rebuild removed the previous set.
+function _G.AddBlipForCoord(x, y, z)
+    harness.nextBlip = harness.nextBlip + 1
+    harness.blips[harness.nextBlip] = { coords = vector3(x, y, z) }
+    return harness.nextBlip
+end
+function _G.DoesBlipExist(blip) return harness.blips[blip] ~= nil end
+function _G.RemoveBlip(blip) harness.blips[blip] = nil end
+function _G.SetBlipSprite(blip, sprite) if harness.blips[blip] then harness.blips[blip].sprite = sprite end end
+function _G.SetBlipColour(blip, colour) if harness.blips[blip] then harness.blips[blip].colour = colour end end
+function _G.SetBlipScale(blip, scale) if harness.blips[blip] then harness.blips[blip].scale = scale end end
+function _G.SetBlipAsShortRange() end
+function _G.SetBlipRoute(blip, enabled) if harness.blips[blip] then harness.blips[blip].route = enabled end end
+function _G.BeginTextCommandSetBlipName() end
+function _G.AddTextComponentString(text) harness.lastBlipName = text end
+function _G.EndTextCommandSetBlipName(blip) if harness.blips[blip] then harness.blips[blip].name = harness.lastBlipName end end
 
 function _G.AddStateBagChangeHandler(key, _, handler)
     harness.handlers['statebag:' .. key] = harness.handlers['statebag:' .. key] or {}
@@ -255,6 +392,74 @@ function harness.loadClient(opts)
         harness.load(file)
     end
     return _G.DAG
+end
+
+-- Places a player on the server side: gives them a ped handle, positions it,
+-- and registers them as connected so GetPlayers() reports them.
+function harness.placePlayer(playerSource, coords)
+    local ped = 1000 + playerSource
+    harness.peds[playerSource] = ped
+    harness.entityCoords[ped] = coords
+    for _, existing in ipairs(harness.players) do
+        if existing == playerSource then return ped end
+    end
+    harness.players[#harness.players + 1] = playerSource
+    return ped
+end
+
+-- Loads the full federal server stack: bridge, the template modules it builds
+-- on, the shared validators, the default catalogs and the federal modules
+-- named in `federal`.
+function harness.loadFederalServer(opts)
+    opts = opts or {}
+    harness.loadServer({
+        adapters = opts.adapters or { 'standalone' },
+        modules = { 'storage', 'access', 'repository', 'commands' }
+    })
+    for _, file in ipairs({ 'constants', 'util', 'schema' }) do
+        harness.load('federal/shared/' .. file .. '.lua')
+    end
+    for _, file in ipairs(opts.catalogs or { 'agencies', 'callouts', 'court' }) do
+        harness.load('federal/config/' .. file .. '.lua')
+    end
+    for _, file in ipairs(opts.federal or { 'core' }) do
+        harness.load('federal/server/' .. file .. '.lua')
+    end
+    return _G.DAG
+end
+
+-- Loads the full federal client stack in the manifest's order, so a file that
+-- touches a native at load time (rather than inside a function or a thread)
+-- fails here instead of on a live server.
+function harness.loadFederalClient(opts)
+    opts = opts or {}
+    harness.loadClient({
+        adapters = opts.adapters or { 'standalone' },
+        modules = { 'menu', 'interactions' }
+    })
+    for _, file in ipairs({ 'constants', 'util', 'schema' }) do
+        harness.load('federal/shared/' .. file .. '.lua')
+    end
+    for _, file in ipairs({ 'agencies', 'callouts', 'court' }) do
+        harness.load('federal/config/' .. file .. '.lua')
+    end
+    for _, file in ipairs(opts.federal or {
+        'state', 'uniforms', 'actions', 'cad', 'armory',
+        'callouts', 'court', 'editor', 'menus', 'zones', 'bootstrap'
+    }) do
+        harness.load('federal/client/' .. file .. '.lua')
+    end
+    return _G.DAG
+end
+
+-- Gives a player a framework job on the standalone adapter, which is what
+-- Core.Membership reads to resolve their agency and rank.
+function harness.setJob(playerSource, name, grade)
+    local player = DAG.Framework.GetPlayer(playerSource)
+    player.job.name = name
+    player.job.label = name
+    player.job.grade = grade or 0
+    return player.job
 end
 
 function harness.lastNuiMessage()

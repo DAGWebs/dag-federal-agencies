@@ -28,6 +28,11 @@ RegisterCommand(Bridge.namespace .. ':report', function()
     Federal.Reports.Call()
 end, false)
 
+-- For inmates: time remaining and the work detail that shortens it.
+RegisterCommand(Bridge.namespace .. ':custody', function()
+    Federal.Jail.Menu()
+end, false)
+
 CreateThread(function()
     -- The framework needs a moment to report a player before the first context
     -- read means anything.

@@ -221,6 +221,7 @@ function Menus.Cells()
         options[#options + 1] = { title = 'Book the nearest subject', icon = 'lock', onSelect = Federal.Actions.Arrest }
         options[#options + 1] = { title = 'Release the nearest subject', icon = 'check', onSelect = Federal.Actions.Release }
     end
+    options[#options + 1] = { title = 'Custody roster', icon = 'user', onSelect = Federal.Jail.Roster }
     options[#options + 1] = { title = 'Court docket', icon = 'info', onSelect = function() Federal.Court.Docket() end }
 
     show(Menus.Id('cells'), 'Holding cells', nil, options)

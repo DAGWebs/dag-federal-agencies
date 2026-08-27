@@ -293,5 +293,39 @@ Config.Federal = {
 
         -- Paid to a real player filling a court role when a case closes.
         stipend = { account = 'bank', amount = 500 }
+    },
+
+    -- Jail. The court decides the sentence; this is where it is served.
+    --
+    -- Set enabled = false if you already run a jail resource -- the
+    -- `federal:sentenced` event still fires either way, so yours can consume
+    -- it without this one competing.
+    jail = {
+        enabled = true,
+
+        -- Bolingbroke. Move it with the in-game editor like anything else.
+        cells = { x = 1691.6, y = 2565.2, z = 45.56 },
+        release = { x = 1846.0, y = 2586.0, z = 45.67 },
+
+        -- Real seconds served per sentenced month. 20 means a 36-month
+        -- sentence is 12 minutes, which is long enough to matter and short
+        -- enough that nobody logs off over it.
+        secondsPerMonth = 20,
+        -- However long the sentence, never longer than this in one sitting.
+        maximumSeconds = 3600,
+
+        -- Time keeps running while the player is offline. Without this the
+        -- obvious play is to disconnect for the whole sentence.
+        serveOffline = true,
+
+        -- Wandering out of the facility is teleported back rather than
+        -- punished, because most escapes are a physics accident.
+        leash = 120.0,
+
+        -- Taken on booking and returned on release.
+        confiscate = true,
+
+        -- Work an inmate can do to shorten the sentence, in seconds removed.
+        labour = { enabled = true, reward = 60, cooldown = 45 }
     }
 }

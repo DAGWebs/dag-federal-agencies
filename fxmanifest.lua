@@ -39,6 +39,7 @@ client_scripts {
     'federal/client/leads.lua',
     'federal/client/callouts.lua',
     'federal/client/court.lua',
+    'federal/client/jail.lua',
     'federal/client/personnel.lua',
     'federal/client/editor.lua',
     'federal/client/hud.lua',
@@ -76,6 +77,7 @@ server_scripts {
     'federal/server/leads.lua',
     'federal/server/callouts.lua',
     'federal/server/court.lua',
+    'federal/server/jail.lua',
     'federal/server/commands.lua',
     'server/main.lua'
 }

@@ -216,6 +216,62 @@ class InterfaceTests(unittest.TestCase):
             self.assertIn(action, handled, f"the UI has no branch for the '{action}' message")
 
 
+class ChannelTests(unittest.TestCase):
+    """Client and server talk over named channels. A name that exists on only
+    one side is a feature that silently does nothing, which no Lua test catches
+    because neither side errors."""
+
+    # Server modules register some channels through small local helpers rather
+    # than a literal call, so those are collected by their prefix too.
+    HELPERS = (
+        (r"editorEvent\('([^']+)'", "editor:"),
+        (r"courtEvent\('([^']+)'", "court:"),
+        (r"personnelEvent\('([^']+)'", "personnel:"),
+        (r"readCallback\('([^']+)'", "cad:"),
+        (r"writeCallback\('([^']+)'", "cad:"),
+    )
+
+    def setUp(self):
+        self.client = list((ROOT / "federal/client").glob("*.lua"))
+        self.server = list((ROOT / "federal/server").glob("*.lua"))
+
+    def _find(self, paths, pattern):
+        found = {}
+        for path in paths:
+            source = re.sub(r"--[^\n]*", "", path.read_text())
+            for name in re.findall(pattern, source):
+                found.setdefault(name, path.name)
+        return found
+
+    def _registered(self, pattern):
+        names = set(self._find(self.server, pattern))
+        for helper, prefix in self.HELPERS:
+            for path in self.server:
+                names.update(prefix + name for name in re.findall(helper, path.read_text()))
+        return names
+
+    def test_every_client_callback_has_a_server_handler(self):
+        handled = self._registered(r"RegisterCallback\(\s*Federal\.Net\('([^']+)'\)")
+        for name, origin in self._find(
+            self.client, r"TriggerCallback\(\s*Federal\.Net\('([^']+)'\)"
+        ).items():
+            self.assertIn(name, handled, f"{origin} calls callback '{name}' with no server handler")
+
+    def test_every_client_event_has_a_server_handler(self):
+        handled = self._registered(r"RegisterNetEvent\(\s*Federal\.Net\('([^']+)'\)")
+        for name, origin in self._find(
+            self.client, r"TriggerServerEvent\(\s*Federal\.Net\('([^']+)'\)"
+        ).items():
+            self.assertIn(name, handled, f"{origin} raises '{name}' with no server handler")
+
+    def test_every_server_push_has_a_client_handler(self):
+        handled = set(self._find(self.client, r"RegisterNetEvent\(\s*Federal\.Net\('([^']+)'\)"))
+        for name, origin in self._find(
+            self.server, r"TriggerClientEvent\(\s*Federal\.Net\('([^']+)'\)"
+        ).items():
+            self.assertIn(name, handled, f"{origin} pushes '{name}' with no client handler")
+
+
 class ConventionTests(unittest.TestCase):
     def source_files(self):
         return {path: path.read_text() for path in ROOT.rglob("*.lua") if "tests" not in path.parts}

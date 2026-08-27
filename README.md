@@ -1,10 +1,13 @@
 # DAG federal agencies
 
 An advanced federal agencies job for FiveM: four agencies out of the box (FIB,
-IAA, DOA and the Secret Service), a per-agency CAD, multi-station facilities
-with locker rooms, armories, evidence labs and boss offices, in-game uniform
-and armory management, full LEO actions, multi-stage investigation callouts,
-and a configurable court process with an NPC judge and NPC jury.
+IAA, DOA and the Secret Service), a per-agency CAD with a full MDT, multi-station
+facilities with locker rooms, armories, evidence labs and boss offices, in-game
+uniform, armory and personnel management, timed and animated LEO actions,
+evidence-driven investigation callouts with suspects who run and fight, 911
+reports from the public, live unit tracking with a panic button, deployable
+field equipment, a configurable court with bail and plea bargaining, and a jail
+to serve the sentence in.
 
 It runs **alongside** Qbox, QBCore/QBus, ESX, legacy vRP, Ox Core, or
 framework-free FiveM through the bundled bridge. It never owns framework jobs,
@@ -562,6 +565,12 @@ rank on the server. The client supplies only a target id — never a distance,
 never an item list, never a "yes I am allowed" flag. Escorting requires the
 subject to be restrained first, and an arrest requires it too.
 
+Nothing is instant. Every action runs a timed, animated, cancellable bar
+(`Config.Federal.timings`) through `ox_lib` when it is running and a bundled NUI
+bar otherwise, and a target who walks away mid-search has not been searched.
+Taking a DNA swab is a skill check — it is the one collection step where
+technique matters and a contaminated sample is a real outcome.
+
 Searching sweeps `Config.Federal.contraband`; found items are reported and,
 when `seizeOnSearch` is on, seized and filed as evidence tied to the subject
 they came from. On a framework whose adapter cannot read inventories the search
@@ -585,6 +594,36 @@ player carrying an active warrant** becomes the subject of the investigation;
 with nobody warranted, an NPC is spawned instead. On-duty officers are never
 selected. This is what stops the warrants players write from being a dead end.
 
+An NPC suspect is not a prop. Each one rolls a disposition at spawn — whether
+they run, whether they fight if cornered, whether they are carrying — and keeps
+it for the callout. An armed suspect keeps the weapon holstered until they
+decide to fight, so arriving on scene is not automatically a shootout. They
+surrender when outnumbered, at gunpoint, when they have run far enough, or when
+cornered and unwilling to fight. **Detaining only works once they are actually
+subdued**, and the prompt follows the ped, so a suspect who ran is arrested
+where they are.
+
+### Leads: what the lab tells you
+
+Analysing evidence produces a **lead**, and a lead changes the case:
+
+| Lead | What you get |
+| --- | --- |
+| Partial plate | A plate to run in the CAD, which names a keeper |
+| An address | A second search location, blipped, with evidence of its own |
+| A name | The subject is identified |
+| A known associate | A witness who will now talk |
+| Financial records | Documentary proof; strengthens the case in court |
+
+Which lead an item yields depends on its kind, except that an item that already
+**matched** somebody always names them. The suspect starts anonymous —
+"Unidentified subject" — because shipping their name with the dispatch would
+make every lead pointless, and an NPC suspect has no identity until a lead gives
+it one: a print that matched Sam Cole means Sam Cole is who you are looking for.
+
+Two stage kinds go with it: `investigate` counts leads actually **followed**
+(not evidence merely collected) and `identify` requires the subject named.
+
 The first officer to attach **hosts** the scene: their client spawns the
 suspect, the witnesses and the evidence markers, so exactly one machine owns
 them, and hosting passes on if they detach.
@@ -593,6 +632,68 @@ them, and hosting passes on if they detach.
 -- Dispatch by hand (needs callout.manage):
 /<resource>:fed:dispatch fib wire-fraud
 ```
+
+### Reports from the public
+
+Callouts on a timer are the same seven cases forever. Any player can call
+something in with `/<resource>:report`: it lands on the duty board with the
+location the server read for the caller, blipped for every on-duty officer, and
+officers respond to it and close it from there.
+
+Reports route to an agency that **actually has units on duty**, so a call is
+never filed to an empty room, and a report whose text matches a configured
+keyword escalates into a full investigation callout — which is what turns a
+phone call into a case. A caller can withhold their name and stays traceable
+server-side. Callers are rate limited and stale reports fall off the board.
+
+### Units, panic and dispatch
+
+On-duty units appear on each other's maps, coloured by status. Who you see
+follows the same grant as records: if you may read an agency's cases, you may
+see its units. Blips clear the moment you go off duty, so a civilian is never
+shown where every federal unit is.
+
+**Panic** (`/<resource>:panic`, bindable) routes every unit to the officer with
+a flashing beacon and a waypoint, and holds — an ordinary status change cannot
+clear it, only the officer can.
+
+Alerts go through one dispatch layer that picks a provider: `ps-dispatch`,
+`cd_dispatch` or `linden_outlawalert` when started, and the built-in
+notification when none is. Two alert systems shouting over each other is worse
+than either alone, so the built-in one is suppressed by default when an external
+provider is handling it.
+
+### Field equipment
+
+Spike strips, cones, barriers, evidence markers and cameras. The client creates
+the object and the server owns the ledger of what is out and who put it there,
+which is what lets an officer pick up somebody else's cones and stops one player
+leaving two hundred barriers on a motorway. Items are consumed on deploy and
+returned on pickup, each piece can be gated on a rank permission, and a
+supervisor can clear everything the agency has out.
+
+### The MDT
+
+The CAD has a full terminal as well as the quick menu: a mouse-driven panel with
+tabs for incidents, warrants, BOLOs, records, evidence, leads, reports, units
+and custody, built from the same server callbacks. Open it at a CAD terminal
+zone, from the main menu, or with `/<resource>:fedcad`.
+
+Actions in it are filtered by rank, and the evidence tab deliberately offers no
+analysis button — the lab is a place, and the server refuses it from anywhere
+else.
+
+### Personnel
+
+`roster.manage` lets a boss run the agency's staff, standing in the command
+office. Hire the person in front of you (face to face, so they have a say in
+it), move people up and down the ladder, dismiss, all written to an audit log.
+
+A boss can never appoint at or above their own grade, and cannot touch someone
+who outranks them. This runs on `Bridge.SetJob`, which re-reads the job
+afterwards, so a framework whose adapter cannot set jobs says so plainly instead
+of letting a boss believe a promotion landed. vRP needs `setJob` added via
+`ExtendAdapter` before personnel works there.
 
 ### The court process
 
@@ -629,10 +730,44 @@ without a second catalog to keep in sync. A judge may depart from the
 recommendation only within `sentencing.judgeDiscretion` — discretionary, not
 arbitrary. Unlisted charges fall back to `court.defaultCharge`.
 
-Arrests file a case automatically (`autoFileOnArrest`). Closing a case notes
-the citizen record, collects the fine, pays the players who took a role, and
-raises an event for a jail resource to act on — this resource decides the
-sentence and does not pretend to serve it:
+**Bail** is priced from the charges and set by the judge at arraignment.
+Posting it releases the defendant until trial; failing to appear forfeits the
+money and draws a bench warrant, because skipping bail has to cost more than it
+saves. The gravest charges (`bail.denyFor`) are not bailable.
+
+**Plea bargaining** lets the prosecution offer a reduced sentence for a guilty
+plea, bounded by `plea.minimumFactor`/`maximumFactor` so a bargain is a discount
+rather than an acquittal. Accepting convicts on the agreed terms without
+troubling the jury, and an agreed sentence is exempt from the discretion band —
+it was bargained, not imposed.
+
+**Continuances** let a judge put a case back when a party is missing, limited so
+a defendant with a patient lawyer never simply avoids trial.
+
+Arrests file a case automatically (`autoFileOnArrest`). Closing a case notes the
+citizen record, collects the fine, pays the players who took a role, and raises
+`federal:sentenced`.
+
+Set `Config.Federal.court.enabled = false` to turn the whole court off; arrests
+still book cleanly.
+
+### The jail
+
+A sentence puts the defendant in custody. Time is counted against a release
+timestamp in wall-clock seconds rather than ticked down, so it survives a restart
+and keeps running while the inmate is offline — otherwise the obvious play is to
+disconnect for the length of the sentence (`jail.serveOffline` if you disagree).
+A second conviction while inside runs consecutively.
+
+Contraband is held on booking and returned on release, which makes taking it a
+consequence rather than a punishment. Inmates take work details to shorten the
+sentence (`/<resource>:custody`), officers get a custody roster they can release
+from, and wandering out is teleported back rather than punished — most escapes
+from a GTA interior are a physics accident.
+
+**Already running a jail resource?** Set `Config.Federal.jail.enabled = false`.
+`federal:sentenced` fires either way, so yours consumes it without this one
+competing:
 
 ```lua
 AddEventHandler(('%s:dag:federal:sentenced'):format(GetCurrentResourceName()), function(sentence)
@@ -640,16 +775,16 @@ AddEventHandler(('%s:dag:federal:sentenced'):format(GetCurrentResourceName()), f
 end)
 ```
 
-Set `Config.Federal.court.enabled = false` to turn the whole court off; arrests
-still book cleanly.
-
 ### Commands
 
 | Command | Who | Does |
 | --- | --- | --- |
 | `/<resource>:fed` | Members | Open the main menu |
-| `/<resource>:fedcad` | `cad.view` | Open the CAD |
+| `/<resource>:fedcad` | `cad.view` | Open the MDT |
 | `/<resource>:fedcourt` | Anyone | Open the court docket |
+| `/<resource>:report` | Anyone | Call something in |
+| `/<resource>:panic` | On-duty members | Panic button (bindable) |
+| `/<resource>:custody` | Inmates | Time remaining and work details |
 | `/<resource>:fed:duty` | Members | Toggle duty |
 | `/<resource>:fed:dispatch <agency> [template]` | `callout.manage` | Dispatch a callout |
 | `/<resource>:fed:status` | `federal.admin` | Agencies and who is on duty |
@@ -667,6 +802,11 @@ template never fight over one.
 | `federal/config/callouts.lua` | Investigation templates and their stages |
 | `federal/config/court.lua` | Courthouses, courtroom seats and the charge catalog |
 
+Notable knobs inside `Config.Federal`: `timings` (how long each action takes),
+`hud`, `units` (tracking and panic), `reports` (911 and the escalation
+keywords), `dispatch` (which provider), `equipment`, `jail`, and
+`callouts.suspect` (how likely a suspect is to run, fight or be armed).
+
 All four are **defaults**. The in-game editor overrides every one of them, and
 those overrides win.
 
@@ -683,24 +823,41 @@ federal/
 │   ├── callouts.lua       investigation templates
 │   └── court.lua          courthouses and the charge catalog
 ├── server/
-│   ├── core.lua           registry, ranks, permission gates, duty, numbering
+│   ├── core.lua           registry, ranks, permission gates, duty, units, panic
 │   ├── cad.lua            incidents, warrants, BOLOs, records, evidence
+│   ├── personnel.lua      hire, promote, dismiss, audit log
 │   ├── uniforms.lua       uniform CRUD and wearing
 │   ├── armory.lua         stock, drawing and the motor pool
 │   ├── actions.lua        every LEO action, authorized server-side
 │   ├── editor.lua         in-game editor endpoints
+│   ├── dispatch.lua       one alert layer over every dispatch resource
+│   ├── equipment.lua      deployable field equipment ledger
+│   ├── reports.lua        911 and tip-offs from the public
+│   ├── leads.lua          what analysed evidence tells you
 │   ├── callouts.lua       the investigation engine
-│   ├── court.lua          the case lifecycle, NPC judge and jury
+│   ├── court.lua          case lifecycle, bail, pleas, NPC judge and jury
+│   ├── jail.lua           serving the sentence
 │   └── commands.lua       server commands
 └── client/
     ├── state.lua          cached context (never authority)
+    ├── progress.lua       timed actions, animations, skill checks
     ├── uniforms.lua       outfit capture and apply
     ├── actions.lua        targeting, restraint, action menus
-    ├── cad.lua            the CAD screens
+    ├── suspects.lua       flee, fight, surrender
+    ├── cad.lua            the quick CAD screens
     ├── armory.lua         locker, armory, motor pool
+    ├── dispatch.lua       built-in alert blips
+    ├── equipment.lua      deploying and picking up
+    ├── units.lua          colleague blips and the panic beacon
+    ├── reports.lua        calling it in, and the board
+    ├── leads.lua          working leads, address markers
     ├── callouts.lua       scene hosting, NPCs, objectives
     ├── court.lua          courtroom, roles, NPC judge and jury
+    ├── jail.lua           being inside
+    ├── personnel.lua      the boss's staff screens
     ├── editor.lua         the in-game editor
+    ├── mdt.lua            the full terminal
+    ├── hud.lua            the duty HUD
     ├── menus.lua          main menu, boss office, zone dispatch
     ├── zones.lua          blips and interactions from the registry
     └── bootstrap.lua      client entry point
@@ -781,7 +938,7 @@ stub, so the tests exercise the code the server runs rather than matching
 source text:
 
 ```bash
-lua5.4 tests/lua/run.lua              # 321 behavioural tests
+lua5.4 tests/lua/run.lua              # 507 behavioural tests
 python3 -m unittest discover -s tests # manifest/adapter/config invariants
 luacheck .                            # lint
 find . -name '*.lua' -not -path './.git/*' -print0 | xargs -0 -n1 luac5.4 -p

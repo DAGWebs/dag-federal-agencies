@@ -24,19 +24,20 @@ end
 
 local function clearScene()
     for _, ped in ipairs(scene.peds) do
+        Federal.Suspects.Forget(ped)
         if DoesEntityExist(ped) then DeleteEntity(ped) end
     end
     for _, interaction in ipairs(scene.interactions) do DAG.Interactions.Remove(interaction) end
     if scene.blip and DoesBlipExist(scene.blip) then RemoveBlip(scene.blip) end
 
-    scene = { calloutId = nil, peds = {}, blip = nil, evidence = {}, interactions = {} }
+    scene = { calloutId = nil, peds = {}, blip = nil, evidence = {}, interactions = {}, suspect = nil }
 end
 
 Callouts.ClearScene = clearScene
 
 -- Scene construction --------------------------------------------------------------
 
-local function spawnPed(model, coords, heading)
+local function spawnPed(model, coords, heading, calm)
     local hash = GetHashKey(model)
     RequestModel(hash)
 
@@ -47,10 +48,16 @@ local function spawnPed(model, coords, heading)
     local ped = CreatePed(4, hash, coords.x, coords.y, coords.z - 1.0, heading or 0.0, true, false)
     SetModelAsNoLongerNeeded(hash)
     SetEntityAsMissionEntity(ped, true, true)
-    SetBlockingOfNonTemporaryEvents(ped, true)
-    SetPedFleeAttributes(ped, 0, false)
     SetPedDiesWhenInjured(ped, false)
-    TaskStartScenarioInPlace(ped, 'WORLD_HUMAN_STAND_IMPATIENT', 0, true)
+
+    -- `calm` peds (witnesses, court NPCs) are meant to stand there. A suspect
+    -- is not: blocking non-temporary events is what made the old suspect a
+    -- prop that waited to be pressed.
+    if calm ~= false then
+        SetBlockingOfNonTemporaryEvents(ped, true)
+        SetPedFleeAttributes(ped, 0, false)
+        TaskStartScenarioInPlace(ped, 'WORLD_HUMAN_STAND_IMPATIENT', 0, true)
+    end
 
     scene.peds[#scene.peds + 1] = ped
     return ped
@@ -129,26 +136,43 @@ local function buildScene(callout)
 
     -- A real player suspect is already in the world; only an NPC needs one.
     if callout.suspect and callout.suspect.kind == 'npc' then
-        local ped = spawnPed(callout.suspect.model, {
+        local spawn = {
             x = callout.location.x + 2.0,
             y = callout.location.y + 1.0,
             z = callout.location.z
-        }, 0.0)
+        }
+        local ped = spawnPed(callout.suspect.model, spawn, 0.0, false)
 
         if ped then
+            local state = Federal.Suspects.Attach(ped, callout.id)
+            scene.suspect = ped
+
             local suspectId = ('federal:callout:%s:suspect'):format(callout.id)
             DAG.Interactions.Register({
                 id = suspectId,
-                coords = vector3(callout.location.x + 2.0, callout.location.y + 1.0, callout.location.z),
+                -- Follows the ped rather than sitting where it spawned: a
+                -- suspect who ran is not detained at their old position.
+                coords = vector3(spawn.x, spawn.y, spawn.z),
+                follow = ped,
                 distance = 2.5,
                 label = 'Press ~INPUT_CONTEXT~ to detain the suspect',
-                canInteract = function() return State.Can('actions.detain') end,
+                canInteract = function()
+                    if not State.Can('actions.detain') then return false end
+                    -- Only once they have actually given up, been beaten, or
+                    -- gone down. Walking up to a fleeing suspect and pressing
+                    -- E is exactly what this replaces.
+                    return state ~= nil and state.subdued == true
+                end,
                 onSelect = function()
+                    local timings = (Config.Federal or {}).timings or {}
+                    if not Federal.Progress.Run({
+                        label = 'Detaining suspect',
+                        duration = timings.cuff or 2500,
+                        animation = 'frisk'
+                    }) then return end
+
+                    Federal.Suspects.Subdue(state)
                     Callouts.Report(callout.id, 'arrest')
-                    if DoesEntityExist(ped) then
-                        ClearPedTasks(ped)
-                        TaskStartScenarioInPlace(ped, 'WORLD_HUMAN_PRISONER_CROUCH', 0, true)
-                    end
                 end
             })
             scene.interactions[#scene.interactions + 1] = suspectId
@@ -164,7 +188,7 @@ local function buildScene(callout)
             y = callout.location.y + 2.0,
             z = callout.location.z
         }
-        local ped = spawnPed(models[((index - 1) % #models) + 1], point, 180.0)
+        local ped = spawnPed(models[((index - 1) % #models) + 1], point, 180.0, true)
 
         if ped then
             local witnessId = ('federal:callout:%s:witness:%d'):format(callout.id, index)

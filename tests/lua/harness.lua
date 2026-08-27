@@ -54,6 +54,12 @@ function harness.reset()
     harness.pedProps = {}
     harness.pedIsMale = false
     harness.pedIsDead = false
+    harness.deadPeds = {}
+    harness.freeAiming = false
+    harness.speeds = {}
+    harness.pedWeapons = {}
+    harness.drawnWeapons = {}
+    harness.pedTasks = {}
     harness.pedArmour = 0
     harness.handcuffed = false
     harness.animDicts = {}
@@ -272,7 +278,10 @@ function _G.TaskPlayAnim(_, dict, name) harness.playingAnim = { dict = dict, nam
 function _G.IsEntityPlayingAnim(_, dict, name)
     return harness.playingAnim ~= nil and harness.playingAnim.dict == dict and harness.playingAnim.name == name
 end
-function _G.TaskStartScenarioInPlace(ped, scenario) harness.scenarios[ped] = scenario end
+function _G.TaskStartScenarioInPlace(ped, scenario)
+    harness.scenarios[ped] = scenario
+    harness.pedTasks[ped] = 'scenario'
+end
 function _G.DisableControlAction() end
 function _G.AttachEntityToEntity(entity, target) harness.attachments[entity] = target end
 function _G.DetachEntity(entity) harness.attachments[entity] = nil end
@@ -280,6 +289,21 @@ function _G.SetPedIntoVehicle(ped, vehicle, seat) harness.seated[ped] = { vehicl
 function _G.IsVehicleSeatFree() return true end
 function _G.PlaySoundFrontend(_, name) harness.sounds[#harness.sounds + 1] = name end
 function _G.IsEntityDead() return harness.pedIsDead == true end
+
+-- Suspect behaviour. Tasks are recorded rather than performed so a test can
+-- assert what a suspect decided to do.
+function _G.IsPedDeadOrDying(ped) return harness.deadPeds[ped] == true end
+function _G.IsPlayerFreeAiming() return harness.freeAiming == true end
+function _G.GetEntitySpeed(ped) return harness.speeds[ped] or 0.0 end
+function _G.SetPedAccuracy() end
+function _G.SetPedSeeingRange() end
+function _G.SetPedHearingRange() end
+function _G.SetPedKeepTask() end
+function _G.GiveWeaponToPed(ped, weapon) harness.pedWeapons[ped] = weapon end
+function _G.SetCurrentPedWeapon(ped, weapon) harness.drawnWeapons[ped] = weapon end
+function _G.TaskHandsUp(ped) harness.pedTasks[ped] = 'handsUp' end
+function _G.TaskSmartFleePed(ped) harness.pedTasks[ped] = 'flee' end
+function _G.TaskCombatPed(ped) harness.pedTasks[ped] = 'combat' end
 
 -- Models and entities.
 function _G.GetHashKey(name) return name end
@@ -449,7 +473,7 @@ function harness.loadFederalClient(opts)
         harness.load('federal/config/' .. file .. '.lua')
     end
     for _, file in ipairs(opts.federal or {
-        'state', 'progress', 'uniforms', 'actions', 'cad', 'armory',
+        'state', 'progress', 'uniforms', 'actions', 'suspects', 'cad', 'armory',
         'callouts', 'court', 'personnel', 'editor', 'menus', 'zones', 'bootstrap'
     }) do
         harness.load('federal/client/' .. file .. '.lua')

@@ -24,6 +24,20 @@ function Interactions.Register(entry)
     return entry.id
 end
 
+-- Where an entry actually is right now. A `follow` entity overrides the
+-- registered coordinates while it exists, so an interaction can track a ped
+-- or vehicle that moves; when the entity is gone the registered position is
+-- used again rather than the entry silently disappearing.
+local function positionOf(entry)
+    if entry.follow and DoesEntityExist(entry.follow) then
+        local at = GetEntityCoords(entry.follow)
+        return vector3(at.x, at.y, at.z)
+    end
+    return entry.coords
+end
+
+Interactions.PositionOf = positionOf
+
 function Interactions.Remove(id)
     entries[id] = nil
 end
@@ -45,10 +59,11 @@ CreateThread(function()
         local closest, closestDistance
 
         for _, entry in pairs(entries) do
-            local distance = #(playerCoords - entry.coords)
+            local at = positionOf(entry)
+            local distance = #(playerCoords - at)
             if distance <= (entry.drawDistance or Config.InteractionDrawDistance) then
                 sleep = 0
-                DrawMarker(entry.marker or 2, entry.coords.x, entry.coords.y, entry.coords.z,
+                DrawMarker(entry.marker or 2, at.x, at.y, at.z,
                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.2, 0.2,
                     80, 160, 255, 180, false, true, 2, false, nil, nil, false)
 

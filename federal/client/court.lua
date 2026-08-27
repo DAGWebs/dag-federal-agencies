@@ -89,7 +89,7 @@ end
 -- Spawns an NPC into a named seat and sits it down.
 local function seatNpc(model, seat)
     if not seat then return nil end
-    local ped = Federal.Callouts.SpawnPed(model, seat.coords, seat.heading)
+    local ped = Federal.Callouts.SpawnPed(model, seat.coords, seat.heading, true)
     if not ped then return nil end
 
     ClearPedTasks(ped)

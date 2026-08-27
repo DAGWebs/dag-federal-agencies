@@ -48,6 +48,10 @@ read_globals = {
     'GetHashKey', 'GetPlayerFromServerId', 'IsVehicleSeatFree',
     'NetworkGetNetworkIdFromEntity', 'PlaySoundFrontend', 'SetEnableHandcuffs',
     'SetPedIntoVehicle', 'SetVehicleNumberPlateText', 'IsEntityDead',
+    -- client: suspect behaviour
+    'GetEntitySpeed', 'GiveWeaponToPed', 'IsPedDeadOrDying', 'IsPlayerFreeAiming',
+    'SetCurrentPedWeapon', 'SetPedAccuracy', 'SetPedHearingRange', 'SetPedKeepTask',
+    'SetPedSeeingRange', 'TaskCombatPed', 'TaskHandsUp', 'TaskSmartFleePed',
 }
 
 exclude_files = { 'tests/lua/vendor/**' }

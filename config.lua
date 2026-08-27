@@ -139,7 +139,30 @@ Config.Federal = {
         -- suspect of an investigation instead of a spawned NPC.
         playerSuspects = true,
         -- Paid to each officer assigned when a callout is closed.
-        reward = { account = 'bank', amount = 750 }
+        reward = { account = 'bank', amount = 750 },
+
+        -- How an NPC suspect behaves when officers arrive. A suspect who
+        -- stands still until someone presses E is not an investigation.
+        suspect = {
+            -- Chance they run rather than wait to be spoken to.
+            fleeChance = 0.55,
+            -- Chance they fight back once cornered.
+            fightChance = 0.25,
+            -- Chance they are carrying a weapon. Only ever drawn if they
+            -- also decide to fight.
+            armedChance = 0.2,
+            weapons = { 'WEAPON_PISTOL', 'WEAPON_KNIFE', 'WEAPON_SWITCHBLADE' },
+            -- They give up when this many officers are within `surrenderRange`,
+            -- or when someone has a gun on them at close range.
+            surrenderUnits = 2,
+            surrenderRange = 12.0,
+            -- Accuracy and health, kept low: this is a suspect to arrest, not
+            -- a boss fight.
+            accuracy = 25,
+            armour = 0,
+            -- How far they will run before tiring and giving up.
+            fleeDistance = 220.0
+        }
     },
 
     -- The job a dismissed officer is put back on. Must exist in your

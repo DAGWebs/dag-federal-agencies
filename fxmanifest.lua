@@ -32,6 +32,7 @@ client_scripts {
     'federal/client/progress.lua',
     'federal/client/uniforms.lua',
     'federal/client/actions.lua',
+    'federal/client/suspects.lua',
     'federal/client/cad.lua',
     'federal/client/armory.lua',
     'federal/client/callouts.lua',

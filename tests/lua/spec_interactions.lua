@@ -138,3 +138,50 @@ test('an entry can open a menu', function()
     end
     assertTrue(opened)
 end)
+
+-- A prompt anchored to a spawn point is wrong the moment the thing it belongs
+-- to moves. Following an entity is what lets a fleeing suspect stay
+-- interactable where they actually are.
+test('an interaction follows the entity it is attached to', function()
+    local DAG = harness.loadClient({ modules = { 'menu', 'interactions' } })
+    local ped = 4242
+    harness.entityCoords[ped] = vector3(100.0, 100.0, 0.0)
+
+    DAG.Interactions.Register({
+        id = 'follow-me',
+        coords = vector3(0.0, 0.0, 0.0),
+        follow = ped
+    })
+
+    local entry = DAG.Interactions.Get('follow-me')
+    assertEq(DAG.Interactions.PositionOf(entry).x, 100.0, 'tracks the entity, not the registration')
+
+    harness.entityCoords[ped] = vector3(250.0, 300.0, 0.0)
+    assertEq(DAG.Interactions.PositionOf(entry).x, 250.0)
+    assertEq(DAG.Interactions.PositionOf(entry).y, 300.0)
+end)
+
+test('a follow entity that no longer exists falls back to the registered spot', function()
+    local DAG = harness.loadClient({ modules = { 'menu', 'interactions' } })
+    DAG.Interactions.Register({
+        id = 'gone',
+        coords = vector3(7.0, 8.0, 9.0),
+        follow = 0
+    })
+
+    local entry = DAG.Interactions.Get('gone')
+    assertEq(DAG.Interactions.PositionOf(entry).x, 7.0, 'the entry does not vanish with the entity')
+end)
+
+test('the marker is drawn where the followed entity is', function()
+    local DAG = harness.loadClient({ modules = { 'menu', 'interactions' } })
+    local ped = 555
+    harness.entityCoords[ped] = vector3(12.0, 0.0, 0.0)
+    harness.playerCoords = vector3(10.0, 0.0, 0.0)
+
+    DAG.Interactions.Register({ id = 'tracked', coords = vector3(0.0, 0.0, 0.0), follow = ped })
+    harness.runThread(harness.threads[1], 1)
+
+    local drawn = harness.drawnMarkers[#harness.drawnMarkers]
+    assertEq(drawn.coords.x, 12.0)
+end)

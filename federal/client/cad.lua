@@ -564,19 +564,10 @@ function CAD.Units()
     end)
 end
 
--- Status board the officer sets on themselves.
+-- Status board the officer sets on themselves. The options come from the unit
+-- module because panic is not an ordinary status: it holds until cleared.
 function CAD.StatusMenu()
-    local options = {}
-    for _, status in ipairs(Const.UnitStatusOrder) do
-        local detail = Const.UnitStatus[status]
-        options[#options + 1] = {
-            title = detail.label,
-            icon = 'user',
-            badgeTone = detail.tone,
-            onSelect = function() Federal.Actions.SetStatus(status) end
-        }
-    end
-    show(id('status'), 'Set your status', nil, options)
+    show(id('status'), 'Set your status', nil, Federal.Units.StatusOptions())
 end
 
 return CAD

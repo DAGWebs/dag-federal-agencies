@@ -32,7 +32,7 @@ read_globals = {
     'AddBlipForCoord', 'AddTextComponentString', 'BeginTextCommandSetBlipName',
     'DoesBlipExist', 'EndTextCommandSetBlipName', 'RemoveBlip',
     'SetBlipAsShortRange', 'SetBlipColour', 'SetBlipRoute', 'SetBlipScale',
-    'SetBlipSprite',
+    'SetBlipSprite', 'SetBlipCoords', 'SetBlipFlashes', 'ShowHeadingIndicatorOnBlip',
     -- client: peds, models and animation
     'ClearPedProp', 'ClearPedTasks', 'CreatePed', 'DeleteEntity',
     'GetPedDrawableVariation', 'GetPedPaletteVariation', 'GetPedPropIndex',

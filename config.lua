@@ -86,6 +86,21 @@ Config.Federal = {
     -- Blips for every configured station.
     blips = true,
 
+    -- Live unit tracking. Officers who cannot see each other cannot back each
+    -- other up, and a roster in a menu is not the same as a blip on the map.
+    units = {
+        enabled = true,
+        -- How often positions are broadcast to the agency, in ms. Every second
+        -- is smooth and cheap; raise it on a very large server.
+        interval = 3000,
+        -- Show units from agencies that share records with yours.
+        shared = true,
+        -- Panic. The one status that has to do something: it locks the
+        -- officer's blip to flashing, routes everyone to them, and holds until
+        -- they clear it themselves.
+        panic = { duration = 120, sound = true, route = true }
+    },
+
     -- How close a player must be to a station zone to use it. Checked on the
     -- server against the player's real position, not the client's claim.
     zoneDistance = 4.0,

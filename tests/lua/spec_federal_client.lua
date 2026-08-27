@@ -467,3 +467,121 @@ test('the HUD can be switched off entirely', function()
     Config.Federal.hud.enabled = false
     assertFalse(DAG.Federal.Hud.Build().visible)
 end)
+
+-- Unit blips -----------------------------------------------------------------
+
+local function onDuty(status)
+    DAG.Federal.State.Apply({
+        agencies = { DAG.Federal.Schema.Agency(Config.Federal.Agencies[1]) },
+        permissions = {},
+        membership = {
+            agencyId = 'fib', grade = 2, rank = 'Senior Special Agent', onDuty = true,
+            unit = { callsign = 'ALPHA-1', status = status or 'available' }
+        }
+    })
+end
+
+test('a unit push draws one blip per colleague', function()
+    loadClient()
+    onDuty()
+    DAG.Federal.Units.Apply({
+        { source = 2, callsign = 'BRAVO-2', name = 'Agent 2', status = 'enroute',
+          coords = { x = 10.0, y = 20.0, z = 30.0 } },
+        { source = 3, callsign = 'CHARLIE-3', name = 'Agent 3', status = 'onscene',
+          coords = { x = 40.0, y = 50.0, z = 60.0 } }
+    })
+
+    local drawn = DAG.Federal.Units.Blips()
+    assertTrue(drawn[2] ~= nil and drawn[3] ~= nil)
+    assertEq(harness.blips[drawn[2]].colour, DAG.Federal.Units.StatusColour.enroute)
+    assertEq(harness.blips[drawn[3]].coords.x, 40.0)
+end)
+
+-- Recreating the blip every interval would make it flicker.
+test('a repeated push moves the existing blip instead of making a new one', function()
+    loadClient()
+    onDuty()
+    DAG.Federal.Units.Apply({
+        { source = 2, callsign = 'BRAVO-2', name = 'Agent 2', status = 'available',
+          coords = { x = 10.0, y = 20.0, z = 30.0 } }
+    })
+    local first = DAG.Federal.Units.Blips()[2]
+
+    DAG.Federal.Units.Apply({
+        { source = 2, callsign = 'BRAVO-2', name = 'Agent 2', status = 'busy',
+          coords = { x = 99.0, y = 20.0, z = 30.0 } }
+    })
+    assertEq(DAG.Federal.Units.Blips()[2], first, 'same blip')
+    assertEq(harness.blips[first].coords.x, 99.0, 'moved')
+    assertEq(harness.blips[first].colour, DAG.Federal.Units.StatusColour.busy)
+end)
+
+test('a unit that drops out of the push loses its blip', function()
+    loadClient()
+    onDuty()
+    DAG.Federal.Units.Apply({
+        { source = 2, callsign = 'B', name = 'Two', status = 'available', coords = { x = 1.0, y = 1.0, z = 1.0 } },
+        { source = 3, callsign = 'C', name = 'Three', status = 'available', coords = { x = 2.0, y = 2.0, z = 2.0 } }
+    })
+
+    DAG.Federal.Units.Apply({
+        { source = 2, callsign = 'B', name = 'Two', status = 'available', coords = { x = 1.0, y = 1.0, z = 1.0 } }
+    })
+    assertTrue(DAG.Federal.Units.Blips()[2] ~= nil)
+    assertNil(DAG.Federal.Units.Blips()[3], 'they went off duty')
+end)
+
+test('a panicking unit flashes and is drawn larger', function()
+    loadClient()
+    onDuty()
+    DAG.Federal.Units.Apply({
+        { source = 2, callsign = 'B', name = 'Two', status = 'panic', panic = true,
+          coords = { x = 1.0, y = 1.0, z = 1.0 } }
+    })
+
+    local blip = DAG.Federal.Units.Blips()[2]
+    assertTrue(harness.blips[blip].flashing)
+    assertEq(harness.blips[blip].scale, 1.0)
+    assertEq(harness.blips[blip].colour, DAG.Federal.Units.StatusColour.panic)
+end)
+
+test('a panic alert drops a routed beacon that clears on demand', function()
+    loadClient()
+    onDuty()
+    TriggerEvent(DAG.Federal.Net('panic'), {
+        source = 2, name = 'Agent 2', callsign = 'BRAVO-2', coords = { x = 5.0, y = 6.0, z = 7.0 }
+    })
+
+    local beacon = DAG.Federal.Units.Panicking()[2]
+    assertTrue(beacon ~= nil)
+    assertTrue(harness.blips[beacon].flashing)
+    assertTrue(harness.blips[beacon].route)
+
+    TriggerEvent(DAG.Federal.Net('panic:clear'), 2)
+    assertNil(DAG.Federal.Units.Panicking()[2])
+end)
+
+-- Leaving them up would show a civilian where every federal unit is.
+test('going off duty clears every unit blip', function()
+    loadClient()
+    onDuty()
+    DAG.Federal.Units.Apply({
+        { source = 2, callsign = 'B', name = 'Two', status = 'available', coords = { x = 1.0, y = 1.0, z = 1.0 } }
+    })
+    assertTrue(DAG.Federal.Units.Blips()[2] ~= nil)
+
+    DAG.Federal.State.Apply({ agencies = {}, permissions = {}, membership = nil })
+    assertNil(DAG.Federal.Units.Blips()[2])
+end)
+
+test('the status menu offers panic separately from the ordinary statuses', function()
+    loadClient()
+    onDuty()
+    local titles = {}
+    for _, option in ipairs(DAG.Federal.Units.StatusOptions()) do titles[option.title] = true end
+
+    assertTrue(titles['Available'])
+    assertTrue(titles['En route'])
+    assertTrue(titles['Panic button'])
+    assertNil(titles['Panic'], 'not offered as an ordinary status')
+end)

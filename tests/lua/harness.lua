@@ -351,6 +351,9 @@ function _G.SetBlipSprite(blip, sprite) if harness.blips[blip] then harness.blip
 function _G.SetBlipColour(blip, colour) if harness.blips[blip] then harness.blips[blip].colour = colour end end
 function _G.SetBlipScale(blip, scale) if harness.blips[blip] then harness.blips[blip].scale = scale end end
 function _G.SetBlipAsShortRange() end
+function _G.SetBlipCoords(blip, x, y, z) if harness.blips[blip] then harness.blips[blip].coords = vector3(x, y, z) end end
+function _G.SetBlipFlashes(blip, on) if harness.blips[blip] then harness.blips[blip].flashing = on end end
+function _G.ShowHeadingIndicatorOnBlip() end
 function _G.SetBlipRoute(blip, enabled) if harness.blips[blip] then harness.blips[blip].route = enabled end end
 function _G.BeginTextCommandSetBlipName() end
 function _G.AddTextComponentString(text) harness.lastBlipName = text end
@@ -478,7 +481,7 @@ function harness.loadFederalClient(opts)
     end
     for _, file in ipairs(opts.federal or {
         'state', 'progress', 'uniforms', 'actions', 'suspects', 'cad', 'armory',
-        'reports', 'leads', 'callouts', 'court', 'jail', 'personnel', 'editor', 'hud', 'menus', 'zones', 'bootstrap'
+        'units', 'reports', 'leads', 'callouts', 'court', 'jail', 'personnel', 'editor', 'hud', 'menus', 'zones', 'bootstrap'
     }) do
         harness.load('federal/client/' .. file .. '.lua')
     end

@@ -317,6 +317,13 @@ end
 function Core.SetStatus(source, status)
     local unit = units[source]
     if not unit or not Const.UnitStatus[status] then return false end
+
+    -- Panic is not a status you drift out of by pressing something else; it
+    -- clears only when the officer clears it.
+    if status == 'panic' then return Core.SetPanic(source, true) end
+    if unit.panic and status ~= 'available' then return false end
+    if unit.panic then return Core.SetPanic(source, false) end
+
     unit.status = status
     Core.BroadcastRoster(unit.agency)
     return true
@@ -333,6 +340,65 @@ function Core.Units(agencyId)
     end
     table.sort(list, function(a, b) return (a.callsign or '') < (b.callsign or '') end)
     return list
+end
+
+-- The roster with live positions attached, which is what a map needs. Kept
+-- separate from Core.Units so a menu listing does not pay for a position read
+-- per unit every time it opens.
+function Core.UnitPositions(agencyId)
+    local list = {}
+    for source, unit in pairs(units) do
+        if not agencyId or unit.agency == agencyId then
+            local entry = Util.Copy(unit)
+            entry.coords = Core.Coords(source)
+            list[#list + 1] = entry
+        end
+    end
+    return list
+end
+
+-- Agencies whose units this player should see: their own, plus any that share
+-- records with them when the config allows it.
+function Core.VisibleUnitAgencies(source)
+    local membership = Core.Membership(source)
+    if not membership then return {} end
+
+    local visible = { [membership.agency.id] = true }
+    if ((settings().units or {}).shared) ~= false then
+        for agencyId in pairs(Core.ReadableAgencies(source)) do visible[agencyId] = true end
+    end
+    return visible
+end
+
+-- Panic is the one status that has to do something. It is held on the unit so
+-- it survives a status change and only clears when the officer clears it.
+function Core.SetPanic(source, active)
+    local unit = units[source]
+    if not unit then return false end
+
+    unit.panic = active == true
+    unit.status = active and 'panic' or 'available'
+    unit.panicAt = active and os.time() or nil
+
+    if active then
+        local position = Core.Coords(source)
+        for _, playerSource in ipairs(Core.OnDutySources(unit.agency)) do
+            TriggerClientEvent(Federal.Net('panic'), playerSource, {
+                source = source,
+                name = unit.name,
+                callsign = unit.callsign,
+                agency = unit.agency,
+                coords = position
+            })
+        end
+    else
+        for _, playerSource in ipairs(Core.OnDutySources(unit.agency)) do
+            TriggerClientEvent(Federal.Net('panic:clear'), playerSource, source)
+        end
+    end
+
+    Core.BroadcastRoster(unit.agency)
+    return true
 end
 
 -- On-duty sources for an agency, used to dispatch callouts.
@@ -402,11 +468,59 @@ function Core.Sync(target)
     end
 end
 
+-- Live positions, pushed to each on-duty officer for the agencies they can
+-- see. Sent per player rather than broadcast because who you may see depends
+-- on which agencies share with yours.
+function Core.BroadcastPositions()
+    local unitSettings = settings().units or {}
+    if unitSettings.enabled == false then return 0 end
+
+    local sent = 0
+    for source, unit in pairs(units) do
+        local visible = Core.VisibleUnitAgencies(source)
+        local payload = {}
+
+        for agencyId in pairs(visible) do
+            for _, entry in ipairs(Core.UnitPositions(agencyId)) do
+                -- No point drawing a blip on yourself.
+                if entry.source ~= source and entry.coords then payload[#payload + 1] = entry end
+            end
+        end
+
+        TriggerClientEvent(Federal.Net('units'), source, payload)
+        sent = sent + 1
+        if unit.panic then payload.panic = true end
+    end
+    return sent
+end
+
 AddEventHandler('playerDropped', function()
     local dropped = source
     local unit = units[dropped]
     units[dropped] = nil
-    if unit then Core.BroadcastRoster(unit.agency) end
+    if unit then
+        -- A panicking officer who disconnects should not leave a beacon that
+        -- nobody can clear.
+        if unit.panic then
+            for _, playerSource in ipairs(Core.OnDutySources(unit.agency)) do
+                TriggerClientEvent(Federal.Net('panic:clear'), playerSource, dropped)
+            end
+        end
+        Core.BroadcastRoster(unit.agency)
+    end
+end)
+
+RegisterNetEvent(Federal.Net('panic'), function(active)
+    local playerSource = source
+    if type(active) ~= 'boolean' then return end
+    Core.SetPanic(playerSource, active)
+end)
+
+CreateThread(function()
+    while true do
+        Wait(math.max(tonumber((settings().units or {}).interval) or 3000, 1000))
+        if Core.Enabled() then Core.BroadcastPositions() end
+    end
 end)
 
 Bridge.RegisterCallback(Federal.Net('context'), function(source, reply)

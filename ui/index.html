@@ -28,6 +28,39 @@
         </section>
     </div>
 
+    <div id="mdt" class="mdt" hidden>
+        <div class="mdt__panel" role="dialog" aria-label="Mobile data terminal">
+            <header class="mdt__header">
+                <div class="mdt__identity">
+                    <span class="mdt__badge" id="mdtAgency">FED</span>
+                    <div>
+                        <div class="mdt__title" id="mdtTitle">Mobile data terminal</div>
+                        <div class="mdt__subtitle" id="mdtSubtitle"></div>
+                    </div>
+                </div>
+                <button class="mdt__close" id="mdtClose" type="button" aria-label="Close">&times;</button>
+            </header>
+
+            <div class="mdt__body">
+                <nav class="mdt__tabs" id="mdtTabs" role="tablist"></nav>
+                <section class="mdt__content">
+                    <div class="mdt__toolbar" id="mdtToolbar" hidden>
+                        <input class="mdt__search" id="mdtSearch" type="text" placeholder="Search" autocomplete="off">
+                    </div>
+                    <div class="mdt__split">
+                        <ul class="mdt__list" id="mdtList"></ul>
+                        <article class="mdt__detail" id="mdtDetail"></article>
+                    </div>
+                </section>
+            </div>
+
+            <footer class="mdt__footer">
+                <span id="mdtStatus">Ready</span>
+                <span class="mdt__hint"><kbd>Esc</kbd> Close</span>
+            </footer>
+        </div>
+    </div>
+
     <div id="hud" class="hud" hidden>
         <div class="hud__unit">
             <span class="hud__badge" id="hudAgency">FED</span>

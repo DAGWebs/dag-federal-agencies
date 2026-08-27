@@ -45,7 +45,13 @@ function Menus.Open()
 
     if State.Can('cad.view') then
         options[#options + 1] = { title = 'Records', header = true }
-        options[#options + 1] = { title = 'Open the CAD', icon = 'box', onSelect = Federal.CAD.Open }
+        options[#options + 1] = {
+            title = 'Open the terminal',
+            description = 'The full MDT',
+            icon = 'box',
+            onSelect = Federal.MDT.Open
+        }
+        options[#options + 1] = { title = 'Quick CAD menu', icon = 'info', onSelect = Federal.CAD.Open }
     end
 
     options[#options + 1] = { title = 'Court', header = true }
@@ -259,7 +265,7 @@ end
 ZONE_HANDLERS.locker = function() Federal.Armory.Locker() end
 ZONE_HANDLERS.armory = function() Federal.Armory.Open() end
 ZONE_HANDLERS.garage = function() Federal.Armory.Garage() end
-ZONE_HANDLERS.cad = function() Federal.CAD.Open() end
+ZONE_HANDLERS.cad = function() Federal.MDT.Open() end
 ZONE_HANDLERS.evidence = function() Federal.CAD.Evidence() end
 ZONE_HANDLERS.boss = function() Menus.Boss() end
 ZONE_HANDLERS.cells = function() Menus.Cells() end

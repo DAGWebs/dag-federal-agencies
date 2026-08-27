@@ -15,7 +15,7 @@ RegisterCommand(Bridge.namespace .. ':fed', function()
 end, false)
 
 RegisterCommand(Bridge.namespace .. ':fedcad', function()
-    Federal.CAD.Open()
+    Federal.MDT.Open()
 end, false)
 
 RegisterCommand(Bridge.namespace .. ':fedcourt', function()

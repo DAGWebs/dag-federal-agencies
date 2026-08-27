@@ -45,6 +45,8 @@
     <button data-overlay="hudCuffed">Duty HUD &mdash; restrained</button>
     <button data-overlay="hudOff">Hide the HUD</button>
     <button data-overlay="progress">Progress bar &mdash; 6s search</button>
+    <button data-overlay="mdt">MDT &mdash; full terminal</button>
+    <button data-overlay="mdtClose">Close the MDT</button>
 
     <h2>Theme</h2>
     <input type="color" id="accent" value="#4c8dff">
@@ -130,7 +132,65 @@ const OVERLAYS = {
         status: 'Panic', statusTone: 'danger', restrained: true
     } },
     hudOff: { action: 'hud', hud: { visible: false } },
-    progress: { action: 'progress:open', label: 'Searching subject', duration: 6000, cancel: true }
+    progress: { action: 'progress:open', label: 'Searching subject', duration: 6000, cancel: true },
+    mdtClose: { action: 'mdt:close' },
+    mdt: { action: 'mdt:open', mdt: {
+        agency: 'FIB', title: 'Federal Investigation Bureau',
+        subtitle: 'Senior Special Agent | On duty', status: 'Ready',
+        incidents: [
+            {
+                id: 'inc-1', title: 'Suspected wire fraud', meta: 'FIB-INC-0007 | Financial crime',
+                pill: 'open', tone: 'accent',
+                sections: [
+                    { label: 'Case', fields: [
+                        { label: 'Number', value: 'FIB-INC-0007' },
+                        { label: 'Type', value: 'Financial crime' },
+                        { label: 'Filed by', value: 'Dana Reyes' },
+                        { label: 'Charges', value: 'Wire fraud, Identity theft' }
+                    ] },
+                    { label: 'Narrative', notes: [
+                        { meta: 'Dana Reyes | 14 Mar 21:04', text: 'Branch manager reports four transfers to a shell account.' },
+                        { meta: 'Dana Reyes | 14 Mar 21:22', text: 'Prints lifted from the terminal, sent to the lab.' }
+                    ] }
+                ],
+                actions: [
+                    { id: 'narrative', label: 'Add narrative' },
+                    { id: 'close', label: 'Close case' },
+                    { id: 'expunge', label: 'Expunge', tone: 'danger' }
+                ]
+            },
+            { id: 'inc-2', title: 'Counterfeit currency passing', meta: 'FIB-INC-0006 | Financial crime',
+              pill: 'closed', tone: 'success', sections: [], actions: [] }
+        ],
+        warrants: [
+            { id: 'w-1', title: 'Sam Cole', meta: 'FIB-WNT-0003 | Wire fraud', pill: 'active', tone: 'danger',
+              sections: [ { label: 'Warrant', fields: [
+                  { label: 'Number', value: 'FIB-WNT-0003' },
+                  { label: 'Reason', value: 'Wire fraud' },
+                  { label: 'Issued by', value: 'Dana Reyes' }
+              ] } ],
+              actions: [ { id: 'serve', label: 'Mark served' }, { id: 'void', label: 'Void', tone: 'danger' } ] }
+        ],
+        bolos: [],
+        records: [],
+        evidence: [
+            { id: 'e-1', title: 'Transfer records', meta: 'FIB-EVD-0011 | Document', pill: 'Analysed',
+              tone: 'success', sections: [ { label: 'Chain of custody', notes: [
+                  { meta: '14 Mar 21:22', text: 'Dana Reyes - collected' },
+                  { meta: '14 Mar 21:48', text: 'Dana Reyes - analysed' }
+              ] } ], actions: [] }
+        ],
+        leads: [
+            { id: 'l-1', title: 'Partial plate', meta: 'A partial plate: KR41 8XZM. Run it in the CAD.',
+              pill: 'New', tone: 'accent', sections: [], actions: [ { id: 'follow', label: 'Follow lead' } ] }
+        ],
+        reports: [],
+        units: [
+            { id: '2', title: 'BRAVO-2 Ali Novak', meta: 'Special Agent | fib-tower', pill: 'En route',
+              tone: 'accent', sections: [], actions: [] }
+        ],
+        custody: []
+    } }
 };
 
 const frame = document.getElementById('frame');

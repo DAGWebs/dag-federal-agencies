@@ -585,3 +585,202 @@ test('the status menu offers panic separately from the ordinary statuses', funct
     assertTrue(titles['Panic button'])
     assertNil(titles['Panic'], 'not offered as an ordinary status')
 end)
+
+-- MDT ---------------------------------------------------------------------------
+
+local function mdtReady()
+    DAG.Federal.State.Apply({
+        agencies = { DAG.Federal.Schema.Agency(Config.Federal.Agencies[1]) },
+        permissions = {
+            ['cad.view'] = true, ['cad.write'] = true, ['cad.warrant'] = true,
+            ['actions.arrest'] = true
+        },
+        membership = {
+            agencyId = 'fib', grade = 2, rank = 'Senior Special Agent', onDuty = true,
+            unit = { callsign = 'ALPHA-1', status = 'available' }
+        }
+    })
+end
+
+test('an incident builds a terminal row with its narrative and actions', function()
+    loadClient()
+    mdtReady()
+
+    local rows = DAG.Federal.MDT.Build('incidents', { {
+        id = 'inc-1', number = 'FIB-INC-0001', title = 'Wire fraud', type = 'Financial crime',
+        status = 'open', createdBy = 'Dana Reyes', createdAt = 1700000000,
+        charges = { 'Wire fraud' },
+        suspects = { { name = 'Sam Cole', identifier = 'license:sam' } },
+        narrative = { { author = 'Dana Reyes', text = 'Initial report', at = 1700000000 } }
+    } })
+
+    assertEq(#rows, 1)
+    assertEq(rows[1].title, 'Wire fraud')
+    assertEq(rows[1].pill, 'open')
+
+    local labels = {}
+    for _, section in ipairs(rows[1].sections) do labels[section.label] = section end
+    assertTrue(labels['Suspects'] ~= nil)
+    assertEq(labels['Narrative'].notes[1].text, 'Initial report')
+
+    local actions = {}
+    for _, action in ipairs(rows[1].actions) do actions[action.id] = true end
+    assertTrue(actions.close and actions.narrative)
+    assertNil(actions.expunge, 'this rank cannot expunge')
+end)
+
+test('terminal actions are filtered by rank', function()
+    loadClient()
+    DAG.Federal.State.Apply({
+        agencies = { DAG.Federal.Schema.Agency(Config.Federal.Agencies[1]) },
+        permissions = { ['cad.view'] = true },
+        membership = { agencyId = 'fib', grade = 0, rank = 'Probationary Agent', onDuty = true }
+    })
+
+    local rows = DAG.Federal.MDT.Build('incidents', { {
+        id = 'inc-1', number = 'FIB-INC-0001', title = 'Case', status = 'open'
+    } })
+    assertEq(#rows[1].actions, 0, 'a reader gets no write actions')
+
+    local warrants = DAG.Federal.MDT.Build('warrants', { {
+        id = 'wnt-1', number = 'FIB-WNT-0001', status = 'active', target = { name = 'Sam' }
+    } })
+    assertEq(#warrants[1].actions, 0)
+end)
+
+test('a served warrant offers no further action', function()
+    loadClient()
+    mdtReady()
+    local rows = DAG.Federal.MDT.Build('warrants', { {
+        id = 'wnt-1', number = 'FIB-WNT-0001', status = 'served', target = { name = 'Sam Cole' }
+    } })
+
+    assertEq(rows[1].tone, 'success')
+    assertEq(#rows[1].actions, 0)
+end)
+
+-- The lab is a place; analysing from a terminal anywhere would be refused by
+-- the server, so the button is not offered.
+test('the evidence tab never offers analysis', function()
+    loadClient()
+    mdtReady()
+    local rows = DAG.Federal.MDT.Build('evidence', { {
+        id = 'evd-1', number = 'FIB-EVD-0001', label = 'Ledger', kind = 'document',
+        analysed = false, chain = { { actor = 'Dana', action = 'collected', at = 1700000000 } }
+    } })
+
+    assertEq(#rows[1].actions, 0)
+    assertEq(rows[1].pill, 'Unprocessed')
+end)
+
+test('a citizen record shows arrests, fines and notes', function()
+    loadClient()
+    mdtReady()
+    local rows = DAG.Federal.MDT.Build('records', { {
+        identifier = 'license:sam', name = 'Sam Cole', printed = true,
+        arrests = { { at = 1700000000, officer = 'Dana', charges = { 'Wire fraud' } } },
+        fines = { { at = 1700000000, amount = 500, reason = 'Citation' } },
+        notes = { { at = 1700000000, text = 'Fingerprinted' } }
+    } })
+
+    local labels = {}
+    for _, section in ipairs(rows[1].sections) do labels[section.label] = section end
+    assertEq(labels['Arrests'].notes[1].text, 'Wire fraud')
+    assertTrue(labels['Fines'] ~= nil and labels['Notes'] ~= nil)
+    assertEq(rows[1].pill, '1 arrest(s)')
+end)
+
+test('an open lead offers to be followed and a worked one does not', function()
+    loadClient()
+    mdtReady()
+    local rows = DAG.Federal.MDT.Build('leads', {
+        { id = 'led-1', number = 'FIB-LED-0001', kind = 'plate', status = 'open', summary = 'A partial plate' },
+        { id = 'led-2', number = 'FIB-LED-0002', kind = 'name', status = 'followed', summary = 'A name' }
+    })
+
+    assertEq(rows[1].actions[1].id, 'follow')
+    assertEq(#rows[2].actions, 0)
+    assertEq(rows[2].pill, 'Worked')
+end)
+
+test('custody rows offer release only to a rank that may arrest', function()
+    loadClient()
+    mdtReady()
+    local rows = DAG.Federal.MDT.Build('custody', { {
+        identifier = 'license:sam', name = 'Sam Cole', months = 36, remaining = 600, online = true
+    } })
+    assertEq(rows[1].actions[1].id, 'release')
+
+    DAG.Federal.State.Apply({
+        agencies = { DAG.Federal.Schema.Agency(Config.Federal.Agencies[1]) },
+        permissions = { ['cad.view'] = true },
+        membership = { agencyId = 'fib', grade = 0, rank = 'Probationary Agent', onDuty = true }
+    })
+    local readOnly = DAG.Federal.MDT.Build('custody', { {
+        identifier = 'license:sam', name = 'Sam Cole', months = 36, remaining = 600
+    } })
+    assertEq(#readOnly[1].actions, 0)
+end)
+
+test('a unit row carries the status tone the map uses', function()
+    loadClient()
+    mdtReady()
+    local rows = DAG.Federal.MDT.Build('units', { {
+        source = 2, callsign = 'BRAVO-2', name = 'Agent 2', rank = 'Special Agent',
+        station = 'fib-tower', status = 'panic'
+    } })
+
+    assertEq(rows[1].pill, 'Panic')
+    assertEq(rows[1].tone, 'danger')
+end)
+
+test('the terminal opens with focus and closes releasing it', function()
+    loadClient()
+    mdtReady()
+    DAG.Federal.MDT.Open()
+
+    -- Every tab callback has to land before the panel opens.
+    for _, pending in ipairs(harness.serverEvents) do
+        local name = tostring(pending.event)
+        if name:find('server:callback', 1, true) then
+            local id = pending.args[1]
+            TriggerEvent(DAG.Framework.Event('client:callback'), id, {})
+        end
+    end
+
+    assertTrue(DAG.Federal.MDT.IsOpen(), 'opened once every tab landed')
+    assertTrue(harness.nuiFocus ~= nil and harness.nuiFocus.focus, 'the terminal takes input')
+
+    DAG.Federal.MDT.Close()
+    assertFalse(DAG.Federal.MDT.IsOpen())
+    assertFalse(harness.nuiFocus.focus, 'and gives it back')
+end)
+
+test('a rank that cannot read the CAD cannot open the terminal', function()
+    loadClient()
+    DAG.Federal.State.Apply({
+        agencies = {}, permissions = {},
+        membership = { agencyId = 'fib', grade = 0, rank = 'Probationary Agent', onDuty = true }
+    })
+
+    DAG.Federal.MDT.Open()
+    assertFalse(DAG.Federal.MDT.IsOpen())
+end)
+
+-- Focus is a global input lock: never leave it held across a restart.
+test('a resource stop releases the terminal focus', function()
+    loadClient()
+    mdtReady()
+    DAG.Federal.MDT.Open()
+    for _, pending in ipairs(harness.serverEvents) do
+        local name = tostring(pending.event)
+        if name:find('server:callback', 1, true) then
+            TriggerEvent(DAG.Framework.Event('client:callback'), pending.args[1], {})
+        end
+    end
+    assertTrue(DAG.Federal.MDT.IsOpen())
+
+    TriggerEvent('onResourceStop', harness.resourceName)
+    assertFalse(DAG.Federal.MDT.IsOpen())
+    assertFalse(harness.nuiFocus.focus)
+end)

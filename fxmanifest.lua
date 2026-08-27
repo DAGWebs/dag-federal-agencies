@@ -43,6 +43,7 @@ client_scripts {
     'federal/client/jail.lua',
     'federal/client/personnel.lua',
     'federal/client/editor.lua',
+    'federal/client/mdt.lua',
     'federal/client/hud.lua',
     'federal/client/menus.lua',
     'federal/client/zones.lua',

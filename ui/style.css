@@ -356,3 +356,68 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
     .menu, .option, .option::before, .option__meter span { transition: none; }
 }
+
+/* Timed-action bar. Lives outside .root so it renders without the menu open
+   and without NUI focus: it is display only and never takes input. */
+.progress {
+    position: fixed;
+    left: 50%;
+    bottom: 12vh;
+    transform: translateX(-50%);
+    width: min(360px, 42vw);
+    padding: 12px 14px 11px;
+    border-radius: var(--menu-radius);
+    background: var(--menu-surface);
+    border: 1px solid var(--menu-border);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+    color: var(--menu-text);
+    font-family: var(--menu-font);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 120ms ease;
+}
+
+.progress[hidden] { display: none; }
+.progress[data-open='true'] { opacity: 1; }
+
+.progress__label {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin-bottom: 8px;
+}
+
+.progress__track {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--menu-surface-raised);
+    overflow: hidden;
+}
+
+.progress__fill {
+    display: block;
+    height: 100%;
+    width: 0;
+    border-radius: 999px;
+    background: var(--menu-accent);
+    /* Width is driven by a CSS transition over the real duration, so the bar
+       and the Lua timer finish together. */
+    transition: width linear;
+}
+
+.progress__hint {
+    margin-top: 7px;
+    font-size: 10.5px;
+    color: var(--menu-text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.progress__hint kbd {
+    font-family: inherit;
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    border: 1px solid var(--menu-border);
+    background: var(--menu-surface-raised);
+}

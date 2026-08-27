@@ -121,6 +121,14 @@ function Menus.Boss()
     end
 
     options[#options + 1] = { title = 'Command', header = true }
+    if State.Can('roster.manage') then
+        options[#options + 1] = {
+            title = 'Personnel',
+            description = 'Hire, promote and dismiss',
+            icon = 'user',
+            onSelect = Federal.Personnel.Open
+        }
+    end
     options[#options + 1] = { title = 'Duty roster', icon = 'user', onSelect = Federal.CAD.Units }
     if State.Can('editor.manage') then
         options[#options + 1] = { title = 'Open the editor', icon = 'wrench', onSelect = Federal.Editor.Open }

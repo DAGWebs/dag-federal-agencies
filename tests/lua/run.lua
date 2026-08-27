@@ -74,6 +74,7 @@ local specs = {
     'tests/lua/spec_federal_callouts.lua',
     'tests/lua/spec_federal_court.lua',
     'tests/lua/spec_federal_client.lua',
+    'tests/lua/spec_federal_personnel.lua',
 }
 
 for _, spec in ipairs(specs) do

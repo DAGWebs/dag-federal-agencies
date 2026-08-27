@@ -228,3 +228,20 @@ test('no two zones of a configured station overlap at the configured distance', 
         end
     end
 end)
+
+-- Any resource can change a job out from under us, and a dismissal changes it
+-- before duty is cleared. Someone who is no longer in the agency must still be
+-- able to leave its roster, or they keep receiving its callouts.
+test('clocking off works even after the player has lost the job', function()
+    loadCore()
+    agent(2)
+    DAG.Federal.Core.SetDuty(1, true)
+    assertEq(#DAG.Federal.Core.Units('fib'), 1)
+
+    harness.setJob(1, 'unemployed', 0)
+    assertNil(DAG.Federal.Core.Membership(1))
+
+    assertTrue(DAG.Federal.Core.SetDuty(1, false))
+    assertEq(#DAG.Federal.Core.Units('fib'), 0)
+    assertNil(DAG.Federal.Core.Unit(1))
+end)

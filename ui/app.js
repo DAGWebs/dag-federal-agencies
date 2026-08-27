@@ -253,13 +253,55 @@
         }
     });
 
+    /* Timed-action bar. Independent of the menu: it renders while the menu is
+       closed and never takes focus, because it is display only. */
+    var progressEl = document.getElementById('progress');
+    var progressLabel = document.getElementById('progressLabel');
+    var progressFill = document.getElementById('progressFill');
+    var progressHint = document.getElementById('progressHint');
+    var progressTimer = null;
+
+    function progressOpen(data) {
+        window.clearTimeout(progressTimer);
+        progressLabel.textContent = data.label || 'Working';
+        progressHint.hidden = !data.cancel;
+
+        progressEl.hidden = false;
+        progressFill.style.transition = 'none';
+        progressFill.style.width = '0%';
+
+        /* Two frames: one to apply the reset with no transition, one to start
+           the real one. Collapsing these makes the bar jump straight to full. */
+        requestAnimationFrame(function () {
+            progressEl.dataset.open = 'true';
+            requestAnimationFrame(function () {
+                progressFill.style.transition = 'width ' + (data.duration || 3000) + 'ms linear';
+                progressFill.style.width = '100%';
+            });
+        });
+    }
+
+    function progressClose() {
+        progressEl.dataset.open = 'false';
+        progressTimer = window.setTimeout(function () {
+            progressEl.hidden = true;
+            progressFill.style.transition = 'none';
+            progressFill.style.width = '0%';
+        }, 140);
+    }
+
     window.addEventListener('message', function (event) {
         var data = event.data || {};
         if (data.action === 'open') { applyTheme(data.theme); open(data.menu || {}); }
         else if (data.action === 'close') close(false);
         else if (data.action === 'theme') applyTheme(data.theme);
+        else if (data.action === 'progress:open') progressOpen(data);
+        else if (data.action === 'progress:close') progressClose();
     });
 
     // Exposed for the offline preview in tests/ui.
-    window.__dagMenu = { open: open, close: close, applyTheme: applyTheme, state: state };
+    window.__dagMenu = {
+        open: open, close: close, applyTheme: applyTheme, state: state,
+        progressOpen: progressOpen, progressClose: progressClose
+    };
 })();

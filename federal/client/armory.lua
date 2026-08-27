@@ -30,7 +30,15 @@ function Armory.Locker()
             badge = wearable and 'Issued' or 'Restricted',
             badgeTone = wearable and 'success' or 'danger',
             disabled = not wearable,
-            onSelect = function() TriggerServerEvent(Federal.Net('uniform:wear'), uniform.id) end
+            onSelect = function()
+                local timings = (Config.Federal or {}).timings or {}
+                if not Federal.Progress.Run({
+                    label = ('Changing into %s'):format(uniform.label),
+                    duration = timings.changeUniform or 4000,
+                    animation = 'change'
+                }) then return end
+                TriggerServerEvent(Federal.Net('uniform:wear'), uniform.id)
+            end
         }
     end
 
@@ -76,7 +84,15 @@ function Armory.Open()
                 badge = entry.price > 0 and ('$%d'):format(entry.price) or 'Issued',
                 badgeTone = entry.locked and 'danger' or 'accent',
                 disabled = entry.locked,
-                onSelect = function() TriggerServerEvent(Federal.Net('armory:draw'), entry.id) end
+                onSelect = function()
+                    local timings = (Config.Federal or {}).timings or {}
+                    if not Federal.Progress.Run({
+                        label = ('Drawing %s'):format(entry.label),
+                        duration = timings.armory or 2000,
+                        animation = 'equip'
+                    }) then return end
+                    TriggerServerEvent(Federal.Net('armory:draw'), entry.id)
+                end
             }
         end
 

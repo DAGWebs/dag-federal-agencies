@@ -47,7 +47,7 @@ read_globals = {
     'DisableControlAction', 'GetActivePlayers', 'GetClosestVehicle',
     'GetHashKey', 'GetPlayerFromServerId', 'IsVehicleSeatFree',
     'NetworkGetNetworkIdFromEntity', 'PlaySoundFrontend', 'SetEnableHandcuffs',
-    'SetPedIntoVehicle', 'SetVehicleNumberPlateText',
+    'SetPedIntoVehicle', 'SetVehicleNumberPlateText', 'IsEntityDead',
 }
 
 exclude_files = { 'tests/lua/vendor/**' }

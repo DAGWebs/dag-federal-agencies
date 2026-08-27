@@ -213,3 +213,122 @@ test('a disabled resource draws nothing rather than dead blips', function()
     for _ in pairs(harness.blips) do drawn = drawn + 1 end
     assertEq(drawn, 0, 'no blips are left on the map')
 end)
+
+-- Timed actions ---------------------------------------------------------------
+
+test('a timed action runs the bar and reports completion', function()
+    loadClient()
+    local completed, sent
+    harness.runThread(function()
+        -- Captured inside the thread: runThread clears the NUI log on the way
+        -- out, and this table reference survives that reset.
+        sent = harness.nuiMessages
+        completed = DAG.Federal.Progress.Run({ label = 'Searching', duration = 1000, animation = 'search' })
+    end, 200)
+
+    assertTrue(completed)
+    local opened, closed = false, false
+    for _, message in ipairs(sent) do
+        if message.action == 'progress:open' then
+            opened = true
+            assertEq(message.label, 'Searching')
+            assertEq(message.duration, 1000)
+        end
+        if message.action == 'progress:close' then closed = true end
+    end
+    assertTrue(opened, 'the bar was shown')
+    assertTrue(closed, 'and taken down again')
+end)
+
+test('a timed action is cancelled by the cancel key', function()
+    loadClient()
+    harness.controlsReleased[202] = true
+
+    local completed
+    harness.runThread(function()
+        completed = DAG.Federal.Progress.Run({ label = 'Searching', duration = 10000 })
+    end, 200)
+
+    assertFalse(completed)
+    assertFalse(DAG.Federal.Progress.Active(), 'and the lock is released')
+end)
+
+-- Being cuffed or killed mid-action means you are no longer in a position to
+-- be doing it, so the action ends rather than completing anyway.
+test('being restrained mid-action interrupts it', function()
+    loadClient()
+    TriggerEvent(DAG.Federal.Net('restraint'), { cuffed = true })
+
+    local completed
+    harness.runThread(function()
+        completed = DAG.Federal.Progress.Run({ label = 'Searching', duration = 10000 })
+    end, 200)
+    assertFalse(completed)
+end)
+
+test('dying mid-action interrupts it', function()
+    loadClient()
+    harness.pedIsDead = true
+
+    local completed
+    harness.runThread(function()
+        completed = DAG.Federal.Progress.Run({ label = 'Searching', duration = 10000 })
+    end, 200)
+    assertFalse(completed)
+end)
+
+-- A leaked lock would leave the player unable to perform any action for the
+-- rest of the session, so it has to survive the bar throwing.
+test('the action lock is released even when the bar is torn down mid-run', function()
+    loadClient()
+    assertFalse(DAG.Federal.Progress.Active())
+
+    -- The wait budget runs out mid-bar, which unwinds the loop the way an
+    -- error inside it would.
+    harness.runThread(function()
+        DAG.Federal.Progress.Run({ label = 'Interrupted', duration = 100000 })
+    end, 3)
+
+    assertFalse(DAG.Federal.Progress.Active(), 'the lock did not leak')
+
+    -- And the next action still works.
+    local completed
+    harness.runThread(function()
+        completed = DAG.Federal.Progress.Run({ label = 'Next', duration = 300 })
+    end, 200)
+    assertTrue(completed)
+end)
+
+test('a zero duration skips the bar entirely', function()
+    loadClient()
+    Config.Federal.timings.search = 0
+    -- timedOnTarget short-circuits, so no NUI message is produced at all.
+    assertTrue(DAG.Federal.Actions.TimedOnTarget(1, 'Searching', 'search', 'search'))
+    assertEq(#harness.nuiMessages, 0)
+end)
+
+-- A suspect who walked off mid-search has not been searched.
+test('a target that moved away during the bar fails the action', function()
+    loadClient()
+    Config.Federal.timings.search = 500
+    harness.activePlayers = {}
+
+    local ok
+    harness.runThread(function()
+        ok = DAG.Federal.Actions.TimedOnTarget(99, 'Searching', 'search', 'search')
+    end, 200)
+    assertFalse(ok, 'the target is no longer the nearest player')
+end)
+
+test('a skill check passes through when no provider can run one', function()
+    loadClient()
+    assertTrue(DAG.Federal.Progress.SkillCheck({ 'easy' }), 'no ox_lib means no gate')
+end)
+
+test('every named animation resolves to a dictionary and clip', function()
+    loadClient()
+    for name, animation in pairs(DAG.Federal.Progress.Animations) do
+        assertTrue(type(animation.dict) == 'string' and animation.dict ~= '', name .. ' dict')
+        assertTrue(type(animation.clip) == 'string' and animation.clip ~= '', name .. ' clip')
+    end
+end)

@@ -11,7 +11,12 @@ local Bridge = DAG.Framework
 --   DAG.Framework.ExtendAdapter('vrp', {
 --       getMoney = function(source, account) ... end,
 --       addMoney = function(source, account, amount) ... end,
+--       setJob = function(source, jobName, grade) ... end,
 --   })
+--
+-- `setJob` matters if you intend to use the federal personnel menu: without
+-- it a boss cannot hire, promote or fire, and the menu says so rather than
+-- appearing to work.
 local probe
 
 local function userId(source)

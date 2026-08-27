@@ -385,3 +385,45 @@ test('a native framework callback transport bypasses the built-in one', function
     callbackEvent()(1, 'native')
     assertEq(harness.clientEvents[1].args[3], 'unknown_callback', 'not stored in the built-in registry')
 end)
+
+-- SetJob is the one bridge write that hands out authority rather than money or
+-- items, so it verifies the change landed instead of trusting the adapter.
+test('SetJob changes the framework job and reports the new one', function()
+    local DAG = harness.loadServer()
+    harness.identifiers[1] = 'license:1'
+
+    assertTrue(DAG.Framework.SetJob(1, 'fib', 3))
+    local job = DAG.Framework.GetJob(1)
+    assertEq(job.name, 'fib')
+    assertEq(job.grade, 3)
+end)
+
+test('SetJob rejects a missing name or a non-integer grade', function()
+    local DAG = harness.loadServer()
+    assertFalse(DAG.Framework.SetJob(1, '', 1))
+    assertFalse(DAG.Framework.SetJob(1, nil, 1))
+    assertFalse(DAG.Framework.SetJob(1, 'fib', -1))
+    assertFalse(DAG.Framework.SetJob(1, 'fib', 1.5))
+    assertFalse(DAG.Framework.SetJob(1, 'fib', 0 / 0), 'NaN')
+end)
+
+-- An adapter reporting success on a job that did not change would leave a boss
+-- believing they promoted someone who was never promoted.
+test('SetJob returns false when the adapter claims success but nothing changed', function()
+    local DAG = harness.loadServer()
+    DAG.Framework.ExtendAdapter('standalone', {
+        setJob = function() return true end
+    })
+
+    assertFalse(DAG.Framework.SetJob(1, 'fib', 3), 'the re-read caught the lie')
+    assertEq(DAG.Framework.GetJob(1).name, 'unemployed')
+end)
+
+test('a framework without setJob reports it as unsupported', function()
+    local DAG = harness.loadServer()
+    assertTrue(DAG.Framework.Supports('setJob'))
+
+    local missing = {}
+    for _, method in ipairs(DAG.Framework.MissingCapabilities()) do missing[method] = true end
+    assertNil(missing.setJob, 'standalone implements it')
+end)

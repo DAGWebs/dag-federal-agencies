@@ -29,12 +29,14 @@ client_scripts {
     -- must exist before the modules that read it, and bootstrap must be last
     -- because it wires the others together.
     'federal/client/state.lua',
+    'federal/client/progress.lua',
     'federal/client/uniforms.lua',
     'federal/client/actions.lua',
     'federal/client/cad.lua',
     'federal/client/armory.lua',
     'federal/client/callouts.lua',
     'federal/client/court.lua',
+    'federal/client/personnel.lua',
     'federal/client/editor.lua',
     'federal/client/menus.lua',
     'federal/client/zones.lua',
@@ -61,6 +63,7 @@ server_scripts {
     -- loads before everything that authorizes through it.
     'federal/server/core.lua',
     'federal/server/cad.lua',
+    'federal/server/personnel.lua',
     'federal/server/uniforms.lua',
     'federal/server/armory.lua',
     'federal/server/actions.lua',

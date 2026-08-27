@@ -37,6 +37,10 @@ Bridge.RegisterAdapter('qb', {
         return ok and allowed == true
     end,
     setDuty = function(source, onDuty) local p = player(source) return p and p.Functions.SetJobDuty(onDuty) or false end,
+    setJob = function(source, jobName, grade)
+        local p = player(source)
+        return p ~= nil and p.Functions.SetJob(jobName, grade) ~= false
+    end,
     createUseableItem = function(item, callback) core().Functions.CreateUseableItem(item, callback) return true end,
     registerCallback = function(name, callback) core().Functions.CreateCallback(name, callback) end
 })

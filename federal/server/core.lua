@@ -280,15 +280,20 @@ end
 -- Duty roster ---------------------------------------------------------------
 
 function Core.SetDuty(source, onDuty, stationId, callsign)
-    local membership = Core.Membership(source)
-    if not membership then return false, 'not a member of a federal agency' end
-
+    -- Clocking off deliberately does NOT require membership. A dismissed
+    -- officer's job has already changed by the time we get here, and any
+    -- resource can change a job out from under us; someone who is no longer
+    -- in the agency must still be able to leave its roster.
     if not onDuty then
+        local unit = units[source]
         units[source] = nil
         Bridge.SetDuty(source, false)
-        Core.BroadcastRoster(membership.agency.id)
+        if unit then Core.BroadcastRoster(unit.agency) end
         return true
     end
+
+    local membership = Core.Membership(source)
+    if not membership then return false, 'not a member of a federal agency' end
 
     local station = Schema.FindById(membership.agency.stations, stationId) or membership.agency.stations[1]
     units[source] = {

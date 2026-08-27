@@ -89,6 +89,18 @@ local function placeEvidence(callout)
             label = 'Press ~INPUT_CONTEXT~ to collect evidence',
             canInteract = function() return State.Can('actions.evidence') end,
             onSelect = function()
+                local timings = (Config.Federal or {}).timings or {}
+                -- Lifting a print off a bad surface can fail; the marker is
+                -- only removed once the work is actually done, so a fumble
+                -- leaves the evidence there to try again.
+                if not Federal.Progress.Attempt({
+                    label = 'Collecting evidence',
+                    duration = timings.collectEvidence or 5000,
+                    animation = 'collect',
+                    skill = kind == 'print' and { 'easy', 'medium' } or nil,
+                    failure = 'You disturbed it. Try again.'
+                }) then return end
+
                 DAG.Interactions.Remove(markerId)
                 Bridge.TriggerCallback(Federal.Net('cad:collect'), function(record)
                     if record then

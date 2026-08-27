@@ -506,6 +506,13 @@ function CAD.EvidenceItem(item)
             description = 'You must be standing in an evidence lab',
             icon = 'wrench',
             onSelect = function()
+                local duration = ((Config.Federal or {}).evidence or {}).analysisTime or 12000
+                if not Federal.Progress.Run({
+                    label = ('Analysing %s'):format(item.number),
+                    duration = duration,
+                    animation = 'analyse'
+                }) then return end
+
                 ask('analyse', function(analysed)
                     if analysed then Bridge.Notify(analysed.result, 'success') end
                     CAD.Evidence()

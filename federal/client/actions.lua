@@ -68,6 +68,30 @@ local function requireTarget()
     return target
 end
 
+local function timing(name)
+    return ((Config.Federal or {}).timings or {})[name] or 3000
+end
+
+-- Runs the bar, then re-checks the target is still there. A suspect who walked
+-- off mid-search has not been searched, and the server would refuse anyway --
+-- catching it here is what stops the officer getting a bare refusal instead of
+-- an explanation.
+local function timedOnTarget(target, label, animation, name)
+    if timing(name) <= 0 then return true end
+    if not Federal.Progress.Run({ label = label, duration = timing(name), animation = animation }) then
+        return false
+    end
+
+    local still = Actions.NearestPlayer((Config.Federal or {}).actionDistance or 4.0)
+    if still ~= target then
+        Bridge.Notify('They moved away before you finished.', 'error')
+        return false
+    end
+    return true
+end
+
+Actions.TimedOnTarget = timedOnTarget
+
 Actions.RequireTarget = requireTarget
 
 -- Restraint ---------------------------------------------------------------------
@@ -152,7 +176,13 @@ end)
 
 function Actions.Cuff()
     local target = requireTarget()
-    if target then TriggerServerEvent(Federal.Net('action:cuff'), target) end
+    if not target then return end
+
+    -- Uncuffing is instant; putting them on is not.
+    if not Federal.Progress.Run({ label = 'Restraining subject', duration = timing('cuff'), animation = 'frisk' }) then
+        return
+    end
+    TriggerServerEvent(Federal.Net('action:cuff'), target)
 end
 
 function Actions.Escort()
@@ -210,6 +240,8 @@ function Actions.Search()
     local target = requireTarget()
     if not target then return end
 
+    if not timedOnTarget(target, 'Searching subject', 'search', 'search') then return end
+
     Bridge.TriggerCallback(Federal.Net('action:search'), function(report, err)
         if not report then return Bridge.Notify(err or 'The search was refused.', 'error') end
         Actions.ShowSearch(report)
@@ -219,6 +251,9 @@ end
 function Actions.SearchVehicle()
     local netId = Actions.NearestVehicle(8.0)
     if not netId then return Bridge.Notify('No vehicle nearby.', 'error') end
+    if not Federal.Progress.Run({ label = 'Searching vehicle', duration = timing('search'), animation = 'search' }) then
+        return
+    end
 
     Bridge.TriggerCallback(Federal.Net('action:searchVehicle'), function(result, err)
         if not result then return Bridge.Notify(err or 'The search was refused.', 'error') end
@@ -295,6 +330,8 @@ function Actions.Fingerprint()
     local target = requireTarget()
     if not target then return end
 
+    if not timedOnTarget(target, 'Taking fingerprints', 'fingerprint', 'fingerprint') then return end
+
     Bridge.TriggerCallback(Federal.Net('action:fingerprint'), function(result, err)
         Bridge.Notify(result and ('%s is now on file.'):format(result.name) or (err or 'Refused.'),
             result and 'success' or 'error')
@@ -304,6 +341,16 @@ end
 function Actions.Swab()
     local target = requireTarget()
     if not target then return end
+
+    -- A swab can be botched: it is the one collection step where technique
+    -- matters, and a fumbled sample is a real outcome.
+    if not Federal.Progress.Attempt({
+        label = 'Taking a DNA swab',
+        duration = timing('swab'),
+        animation = 'swab',
+        skill = { 'easy', 'medium' },
+        failure = 'You contaminated the sample.'
+    }) then return end
 
     Bridge.TriggerCallback(Federal.Net('action:swab'), function(record, err)
         Bridge.Notify(record and ('Swab logged as %s.'):format(record.number) or (err or 'Refused.'),

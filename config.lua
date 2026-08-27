@@ -108,6 +108,22 @@ Config.Federal = {
     -- Fines written from the CAD. Bounds are enforced on the server.
     fines = { account = 'bank', minimum = 50, maximum = 50000 },
 
+    -- How long each timed action takes, in ms. Nothing in this resource is
+    -- instant: an action that resolves the frame you press E reads as a menu
+    -- click and cannot be interrupted. Set any of these to 0 to skip the bar.
+    timings = {
+        search = 6000,
+        frisk = 3000,
+        fingerprint = 5000,
+        swab = 4000,
+        collectEvidence = 5000,
+        cuff = 2500,
+        armory = 2000,
+        changeUniform = 4000,
+        deploy = 2000,
+        writeReport = 4000
+    },
+
     -- Evidence lab. `analysisTime` is how long the lab bench takes, in ms.
     evidence = { analysisTime = 12000 },
 
@@ -125,6 +141,10 @@ Config.Federal = {
         -- Paid to each officer assigned when a callout is closed.
         reward = { account = 'bank', amount = 750 }
     },
+
+    -- The job a dismissed officer is put back on. Must exist in your
+    -- framework; most cores call it 'unemployed'.
+    unemployedJob = 'unemployed',
 
     -- Charged when a vehicle is drawn from a motor pool.
     vehiclePrice = 0,

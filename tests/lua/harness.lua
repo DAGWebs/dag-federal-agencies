@@ -53,6 +53,7 @@ function harness.reset()
     harness.pedComponents = {}
     harness.pedProps = {}
     harness.pedIsMale = false
+    harness.pedIsDead = false
     harness.pedArmour = 0
     harness.handcuffed = false
     harness.animDicts = {}
@@ -112,7 +113,10 @@ harness.STOP = '__harness_stop__'
 -- Resource threads are `while true` loops. A wait budget lets a test run an
 -- exact number of iterations and then unwind via a sentinel error.
 function _G.Wait(ms)
-    harness.gameTimer = harness.gameTimer + (ms or 0)
+    -- Wait(0) yields one frame in FiveM (~16ms), not zero time. Treating it as
+    -- zero would make any loop that polls with Wait(0) spin forever against
+    -- its own GetGameTimer deadline.
+    harness.gameTimer = harness.gameTimer + ((ms and ms > 0) and ms or 16)
     if not harness.waitBudget then return end
     if harness.waitBudget <= 0 then error(harness.STOP, 0) end
     harness.waitBudget = harness.waitBudget - 1
@@ -275,6 +279,7 @@ function _G.DetachEntity(entity) harness.attachments[entity] = nil end
 function _G.SetPedIntoVehicle(ped, vehicle, seat) harness.seated[ped] = { vehicle = vehicle, seat = seat } end
 function _G.IsVehicleSeatFree() return true end
 function _G.PlaySoundFrontend(_, name) harness.sounds[#harness.sounds + 1] = name end
+function _G.IsEntityDead() return harness.pedIsDead == true end
 
 -- Models and entities.
 function _G.GetHashKey(name) return name end
@@ -444,8 +449,8 @@ function harness.loadFederalClient(opts)
         harness.load('federal/config/' .. file .. '.lua')
     end
     for _, file in ipairs(opts.federal or {
-        'state', 'uniforms', 'actions', 'cad', 'armory',
-        'callouts', 'court', 'editor', 'menus', 'zones', 'bootstrap'
+        'state', 'progress', 'uniforms', 'actions', 'cad', 'armory',
+        'callouts', 'court', 'personnel', 'editor', 'menus', 'zones', 'bootstrap'
     }) do
         harness.load('federal/client/' .. file .. '.lua')
     end

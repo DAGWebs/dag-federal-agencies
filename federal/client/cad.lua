@@ -86,6 +86,12 @@ function CAD.Open()
         end
         if modules.evidence ~= false then
             options[#options + 1] = { title = 'Evidence locker', icon = 'box', onSelect = CAD.Evidence }
+            options[#options + 1] = {
+                title = 'Leads',
+                description = 'What the lab found, and what to do about it',
+                icon = 'info',
+                onSelect = function() Federal.Leads.Open() end
+            }
         end
         if modules.units ~= false then
             options[#options + 1] = { title = 'Roster', header = true }

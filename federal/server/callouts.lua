@@ -196,12 +196,17 @@ local function publicView(callout)
         witnesses = callout.witnesses,
         assigned = callout.assigned,
         host = callout.host,
+        -- The suspect stays anonymous until a lead names them. Shipping the
+        -- name with the dispatch would make every lead pointless.
         suspect = callout.suspect and {
             kind = callout.suspect.kind,
-            name = callout.suspect.name,
+            identified = callout.identified == true,
+            name = callout.identified and callout.suspect.name or 'Unidentified subject',
             model = callout.suspect.model,
-            source = callout.suspect.kind == 'player' and callout.suspect.source or nil
-        } or nil
+            source = (callout.identified and callout.suspect.kind == 'player')
+                and callout.suspect.source or nil
+        } or nil,
+        leads = callout.leads or {}
     }
 end
 
@@ -269,6 +274,8 @@ function Callouts.Dispatch(agencyId, templateId, locationIndex)
         assigned = {},
         host = nil,
         flags = {},
+        leads = {},
+        identified = false,
         createdAt = os.time()
     }
 
@@ -398,6 +405,24 @@ validators.arrest = function(source, callout, stage)
     return true
 end
 
+-- Requires the officers to have actually followed leads, which is what makes
+-- analysing evidence at the lab worth the trip.
+validators.investigate = function(_, callout, stage)
+    local worked = Callouts.LeadCount(callout)
+    if worked < (stage.count or 1) then
+        return false, ('%d of %d leads followed'):format(worked, stage.count or 1)
+    end
+    return true
+end
+
+-- The suspect has to be identified before they can be detained by name. An
+-- unidentified subject can still be arrested at the scene; this gate is for
+-- templates that want the investigation done first.
+validators.identify = function(_, callout)
+    if not callout.identified then return false, 'the subject has not been identified yet' end
+    return true
+end
+
 validators.report = function()
     return true
 end
@@ -430,6 +455,57 @@ function Callouts.Progress(source, calloutId, stageId)
 
     notify(callout, 'callout:update', publicView(callout))
     return publicView(callout)
+end
+
+-- Applies what a lead unlocks. This is the join between evidence and the
+-- shape of the case: a name identifies the suspect, an address puts a second
+-- search location on the map, a contact brings a witness to the scene.
+function Callouts.Reveal(callout, lead)
+    if type(callout) ~= 'table' or type(lead) ~= 'table' then return nil end
+
+    callout.leads = callout.leads or {}
+    for _, existing in ipairs(callout.leads) do
+        if existing.id == lead.id then return callout end
+    end
+
+    local entry = {
+        id = lead.id,
+        number = lead.number,
+        kind = lead.kind,
+        summary = lead.summary,
+        plate = lead.plate,
+        location = lead.location,
+        name = lead.name
+    }
+    callout.leads[#callout.leads + 1] = entry
+
+    if lead.kind == 'name' or lead.kind == 'plate' then
+        callout.identified = true
+
+        -- An NPC suspect has no identity of its own. The lead that named
+        -- somebody is what gives it one: a print at the scene matched Sam
+        -- Cole, so Sam Cole is who the officers are now looking for. Without
+        -- this, identifying an NPC reveals the words "Unidentified subject".
+        if lead.name and callout.suspect and callout.suspect.kind == 'npc' then
+            callout.suspect.name = lead.name
+            callout.suspect.identifier = lead.subject or callout.suspect.identifier
+        end
+    end
+    if lead.kind == 'contact' then
+        callout.flags.extraWitness = true
+    end
+    if lead.kind == 'ledger' then
+        callout.flags.documented = true
+    end
+
+    notify(callout, 'callout:update', publicView(callout))
+    return callout
+end
+
+-- How many leads have been worked on this case. Used by the optional
+-- investigation stage below.
+function Callouts.LeadCount(callout)
+    return #(callout.leads or {})
 end
 
 -- Hooks called by the actions module so a real arrest or search advances the

@@ -6,6 +6,11 @@
 -- on the server against the stage's kind and the officer's real position, so a
 -- stage cannot be skipped.
 --
+-- Stage kinds: arrive, interview, evidence, investigate, identify, search,
+-- arrest, report. `investigate` requires leads produced by the lab to have
+-- been followed, and `identify` requires one of them to have named the
+-- subject -- which is what makes analysing evidence worth doing.
+--
 -- `suspect.source`:
 --   'auto'   prefer a real player carrying an active warrant, else spawn an NPC
 --   'player' only run when a real warranted player is online
@@ -38,6 +43,17 @@ local function search(label)
     return { id = 'search', kind = 'search', label = label or 'Search the suspect for contraband' }
 end
 
+-- Requires evidence to have been analysed at the lab and the leads it produced
+-- actually followed. This is the stage that makes the lab worth the trip.
+local function investigate(label, count)
+    return { id = 'investigate', kind = 'investigate', label = label or 'Follow up the leads', count = count or 1 }
+end
+
+-- The subject is anonymous until a lead names them.
+local function identify(label)
+    return { id = 'identify', kind = 'identify', label = label or 'Identify the subject' }
+end
+
 local function arrest(label)
     return { id = 'arrest', kind = 'arrest', label = label or 'Detain the suspect' }
 end
@@ -66,6 +82,8 @@ Config.Federal.Callouts = {
             arrive('Respond to the reporting business'),
             interview('Interview the branch manager'),
             evidence('Recover the transfer records and prints', 2, { 'document', 'print' }),
+            investigate('Analyse the evidence and work the leads', 1),
+            identify('Identify the account holder'),
             arrest('Detain the account holder'),
             report()
         },
@@ -90,6 +108,7 @@ Config.Federal.Callouts = {
         stages = {
             arrive('Reach the last known contact point', 30.0),
             evidence('Process the meeting site', 3, { 'casing', 'dna', 'print' }),
+            investigate('Run the samples and work the leads', 2),
             interview('Canvass the area for a witness'),
             arrest('Detain the person responsible'),
             report()
@@ -115,6 +134,8 @@ Config.Federal.Callouts = {
         stages = {
             arrive('Take up an observation position'),
             evidence('Recover the dead drop', 2, { 'document', 'dna' }),
+            investigate('Analyse the drop and work the leads', 1),
+            identify('Identify the asset'),
             search('Search the asset'),
             arrest('Detain the asset for questioning'),
             report()
@@ -167,6 +188,7 @@ Config.Federal.Callouts = {
             arrive('Respond to the reporting business'),
             interview('Interview the cashier'),
             evidence('Recover the marked bills', 2, { 'document', 'print' }),
+            investigate('Trace the bills back', 1),
             search('Search the passer'),
             arrest('Detain the passer'),
             report()
@@ -193,6 +215,8 @@ Config.Federal.Callouts = {
             arrive('Secure the protective perimeter', 30.0),
             interview('Interview the detail supervisor'),
             evidence('Process the threat material', 2, { 'document', 'print', 'dna' }),
+            investigate('Work the leads from the material', 1),
+            identify('Identify the source of the threat'),
             arrest('Detain the source of the threat'),
             report()
         },

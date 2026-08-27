@@ -574,6 +574,18 @@ function CAD.AnalyseEvidence(source, id)
 
     record.chain[#record.chain + 1] = { actor = membership.name, action = 'analysed', at = now() }
     evidence.save(record.id, record)
+
+    -- Analysis is where evidence stops being a number on a list and starts
+    -- pointing somewhere. The lead module owns what it points at.
+    if Federal.Leads then
+        local lead = Federal.Leads.FromEvidence(source, record)
+        if lead then
+            record.lead = lead.id
+            evidence.save(record.id, record)
+            Bridge.Notify(source, lead.summary, 'inform', 9000)
+        end
+    end
+
     return record
 end
 

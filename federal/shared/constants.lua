@@ -93,13 +93,38 @@ Const.ObjectiveKinds = {
     arrive   = 'Reach the scene',
     interview = 'Interview a person of interest',
     evidence = 'Collect evidence',
+    investigate = 'Follow up the leads',
+    identify = 'Identify the subject',
     search   = 'Search a suspect or vehicle',
     arrest   = 'Detain the suspect',
     report   = 'File the incident report'
 }
 
 -- Numbering series. Each agency keeps its own counter per series.
-Const.Series = { incident = 'INC', warrant = 'WNT', bolo = 'BLO', evidence = 'EVD', callout = 'CAD', court = 'CR' }
+Const.Series = { incident = 'INC', warrant = 'WNT', bolo = 'BLO', evidence = 'EVD', callout = 'CAD', court = 'CR', lead = 'LED' }
+
+-- Investigation leads -------------------------------------------------------
+
+-- What analysing a piece of evidence can tell you. A lead is the difference
+-- between evidence that decorates a case and evidence that moves it: each one
+-- unlocks something concrete rather than writing a line of text.
+--
+--   plate    a vehicle to run in the CAD, which names its keeper
+--   address  a second location to search, added to the map
+--   name     identifies the suspect, revealing who you are looking for
+--   contact  a witness who will now talk, spawned at the scene
+--   ledger   documentary proof; strengthens the case in court
+Const.LeadKinds = {
+    plate   = { label = 'Partial plate',    reveals = 'vehicle' },
+    address = { label = 'An address',       reveals = 'location' },
+    name    = { label = 'A name',           reveals = 'suspect' },
+    contact = { label = 'A known associate', reveals = 'witness' },
+    ledger  = { label = 'Financial records', reveals = 'evidence' }
+}
+
+Const.LeadKindOrder = { 'plate', 'address', 'name', 'contact', 'ledger' }
+
+Const.LeadStatus = { 'open', 'followed', 'cold' }
 
 -- Court ---------------------------------------------------------------------
 

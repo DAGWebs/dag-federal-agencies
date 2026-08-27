@@ -282,7 +282,25 @@ function Callouts.Detail(calloutId)
         }
     end
 
+    if #(callout.leads or {}) > 0 then
+        options[#options + 1] = { title = 'Leads', header = true }
+        for _, lead in ipairs(callout.leads) do
+            options[#options + 1] = {
+                title = lead.summary or lead.kind,
+                icon = 'info',
+                badge = lead.number,
+                disabled = true
+            }
+        end
+    end
+
     options[#options + 1] = { title = 'Actions', header = true }
+    options[#options + 1] = {
+        title = 'Leads for this case',
+        icon = 'info',
+        badge = tostring(#(callout.leads or {})),
+        onSelect = function() Federal.Leads.Open(calloutId) end
+    }
     if not assigned then
         options[#options + 1] = {
             title = 'Attach to this callout',

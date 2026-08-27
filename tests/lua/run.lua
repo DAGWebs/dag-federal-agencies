@@ -72,6 +72,7 @@ local specs = {
     'tests/lua/spec_federal_operations.lua',
     'tests/lua/spec_federal_editor.lua',
     'tests/lua/spec_federal_callouts.lua',
+    'tests/lua/spec_federal_leads.lua',
     'tests/lua/spec_federal_court.lua',
     'tests/lua/spec_federal_client.lua',
     'tests/lua/spec_federal_personnel.lua',

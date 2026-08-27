@@ -72,6 +72,7 @@ function harness.reset()
     harness.models = {}
     harness.spawnedPeds = {}
     harness.spawnedVehicles = {}
+    harness.objects = {}
     harness.activePlayers = {}
     harness.closestVehicle = nil
     harness.blips = {}
@@ -293,6 +294,15 @@ function _G.IsEntityDead() return harness.pedIsDead == true end
 function _G.SetNewWaypoint(x, y) harness.waypoint = { x = x, y = y } end
 function _G.SetEntityCoords(entity, x, y, z) harness.entityCoords[entity] = vector3(x, y, z) end
 function _G.ClearPedTasksImmediately() end
+function _G.CreateObject(model, x, y, z)
+    harness.nextEntity = harness.nextEntity + 1
+    harness.objects[harness.nextEntity] = { model = model, coords = vector3(x, y, z) }
+    harness.entityCoords[harness.nextEntity] = vector3(x, y, z)
+    return harness.nextEntity
+end
+function _G.FreezeEntityPosition() end
+function _G.PlaceObjectOnGroundProperly() end
+function _G.SetEntityHeading(entity, heading) harness.headings[entity] = heading end
 
 -- Suspect behaviour. Tasks are recorded rather than performed so a test can
 -- assert what a suspect decided to do.
@@ -328,6 +338,8 @@ function _G.SetVehicleNumberPlateText() end
 function _G.DeleteEntity(entity)
     harness.spawnedPeds[entity] = nil
     harness.spawnedVehicles[entity] = nil
+    harness.objects[entity] = nil
+    harness.entityCoords[entity] = nil
 end
 function _G.SetEntityAsMissionEntity() end
 function _G.SetBlockingOfNonTemporaryEvents() end
@@ -481,7 +493,7 @@ function harness.loadFederalClient(opts)
     end
     for _, file in ipairs(opts.federal or {
         'state', 'progress', 'uniforms', 'actions', 'suspects', 'cad', 'armory',
-        'units', 'reports', 'leads', 'callouts', 'court', 'jail', 'personnel', 'editor', 'mdt', 'hud', 'menus', 'zones', 'bootstrap'
+        'dispatch', 'equipment', 'units', 'reports', 'leads', 'callouts', 'court', 'jail', 'personnel', 'editor', 'mdt', 'hud', 'menus', 'zones', 'bootstrap'
     }) do
         harness.load('federal/client/' .. file .. '.lua')
     end

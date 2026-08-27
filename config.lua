@@ -185,6 +185,51 @@ Config.Federal = {
         }
     },
 
+    -- Dispatch. Most servers already run a dispatch resource, and two alert
+    -- systems shouting over each other is worse than either alone.
+    --
+    -- 'auto' uses whichever of the supported resources is started and falls
+    -- back to the built-in notification when none is. Force one with its name,
+    -- or 'internal' to always use the built-in.
+    dispatch = {
+        provider = 'auto', -- auto, internal, ps-dispatch, cd_dispatch, linden_outlawalert
+        -- Also send the built-in notification when an external provider is
+        -- handling the alert. Off by default: that is the double-alert.
+        alsoInternal = false
+    },
+
+    -- Deployable field equipment. Each entry may require an item, which is
+    -- consumed on deploy and returned when it is picked back up.
+    equipment = {
+        enabled = true,
+        -- How many of each thing one officer may have out at once.
+        limit = 8,
+        -- How far away a deployed object can be picked up from.
+        pickupDistance = 2.5,
+        items = {
+            {
+                id = 'spikes', label = 'Spike strip', model = 'p_ld_stinger_s',
+                item = 'spikestrip', permission = 'actions.detain', offset = 2.0
+            },
+            {
+                id = 'cone', label = 'Traffic cone', model = 'prop_roadcone02a',
+                permission = 'actions.detain', offset = 1.2
+            },
+            {
+                id = 'barrier', label = 'Road barrier', model = 'prop_barrier_work05',
+                permission = 'actions.detain', offset = 2.0
+            },
+            {
+                id = 'marker', label = 'Evidence marker', model = 'prop_cs_evidencemarker',
+                permission = 'actions.evidence', offset = 1.0
+            },
+            {
+                id = 'camera', label = 'Surveillance camera', model = 'prop_cctv_pole_01',
+                item = 'surveillance_camera', permission = 'actions.evidence', offset = 1.5
+            }
+        }
+    },
+
     -- Investigation callouts. See federal/config/callouts.lua for templates.
     callouts = {
         enabled = true,

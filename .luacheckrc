@@ -48,6 +48,7 @@ read_globals = {
     'GetHashKey', 'GetPlayerFromServerId', 'IsVehicleSeatFree',
     'NetworkGetNetworkIdFromEntity', 'PlaySoundFrontend', 'SetEnableHandcuffs',
     'SetPedIntoVehicle', 'SetVehicleNumberPlateText', 'IsEntityDead', 'SetNewWaypoint', 'SetEntityCoords', 'ClearPedTasksImmediately',
+    'CreateObject', 'FreezeEntityPosition', 'PlaceObjectOnGroundProperly', 'SetEntityHeading',
     -- client: suspect behaviour
     'GetEntitySpeed', 'GiveWeaponToPed', 'IsPedDeadOrDying', 'IsPlayerFreeAiming',
     'SetCurrentPedWeapon', 'SetPedAccuracy', 'SetPedHearingRange', 'SetPedKeepTask',

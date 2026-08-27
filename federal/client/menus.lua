@@ -40,7 +40,8 @@ function Menus.Open()
         { title = 'LEO actions', icon = 'lock', onSelect = Menus.Actions },
         { title = 'Active callouts', icon = 'info', onSelect = Federal.Callouts.Menu },
         { title = 'Reported incidents', icon = 'info', onSelect = Federal.Reports.Board },
-        { title = 'Set your status', icon = 'user', onSelect = Federal.CAD.StatusMenu }
+        { title = 'Set your status', icon = 'user', onSelect = Federal.CAD.StatusMenu },
+        { title = 'Field equipment', icon = 'box', onSelect = Federal.Equipment.Menu }
     }
 
     if State.Can('cad.view') then

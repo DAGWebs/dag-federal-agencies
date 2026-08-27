@@ -391,6 +391,20 @@ function Core.SetPanic(source, active)
                 coords = position
             })
         end
+
+        if Federal.Dispatch and position then
+            Federal.Dispatch.Alert({
+                id = ('panic-%d'):format(source),
+                agency = unit.agency,
+                title = 'Officer needs assistance',
+                message = ('%s %s'):format(unit.callsign or '', unit.name or ''),
+                coords = position,
+                sprite = 161,
+                colour = 1,
+                priority = 3,
+                code = '10-13'
+            })
+        end
     else
         for _, playerSource in ipairs(Core.OnDutySources(unit.agency)) do
             TriggerClientEvent(Federal.Net('panic:clear'), playerSource, source)

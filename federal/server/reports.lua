@@ -174,6 +174,23 @@ function Reports.Broadcast(report)
     for _, playerSource in ipairs(Core.OnDutySources(report.agency)) do
         TriggerClientEvent(Federal.Net('report'), playerSource, Reports.View(report))
     end
+
+    -- New reports also go out through the dispatch layer; updates to an
+    -- existing one do not, or every acknowledgement re-alerts the shift.
+    if report.status == 'open' and Federal.Dispatch then
+        Federal.Dispatch.Alert({
+            id = report.id,
+            agency = report.agency,
+            title = 'Reported incident',
+            message = report.text,
+            coords = report.location,
+            caller = report.caller,
+            sprite = 280,
+            colour = 1,
+            priority = 2,
+            code = '10-90'
+        })
+    end
 end
 
 function Reports.Board(source)

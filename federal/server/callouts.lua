@@ -281,6 +281,23 @@ function Callouts.Dispatch(agencyId, templateId, locationIndex)
 
     active[callout.id] = callout
     notify(callout, 'callout:dispatch', publicView(callout))
+
+    -- Also through the dispatch layer, so a server running ps-dispatch or
+    -- cd_dispatch gets the alert in the system its players already watch.
+    if Federal.Dispatch then
+        Federal.Dispatch.Alert({
+            id = callout.id,
+            agency = agencyId,
+            title = callout.label,
+            message = callout.description,
+            coords = callout.location,
+            sprite = callout.blip and callout.blip.sprite or 480,
+            colour = callout.blip and callout.blip.color or 5,
+            priority = callout.priority,
+            code = callout.number
+        })
+    end
+
     return publicView(callout)
 end
 

@@ -352,7 +352,37 @@ Config.Federal = {
         },
 
         -- Paid to a real player filling a court role when a case closes.
-        stipend = { account = 'bank', amount = 500 }
+        stipend = { account = 'bank', amount = 500 },
+
+        -- Bail. A defendant who posts it walks until the trial; if they never
+        -- come back, it is forfeit and a warrant follows.
+        bail = {
+            enabled = true,
+            account = 'bank',
+            -- Multiplied by the recommended fine to set the amount, then
+            -- clamped. A serious charge is dearer to walk away from.
+            multiplier = 0.35,
+            minimum = 500,
+            maximum = 100000,
+            -- Seconds a released defendant has to appear before bail is
+            -- forfeit and the court issues a bench warrant.
+            appearBy = 1800,
+            -- Charges that are never bailable, matched against the catalog.
+            denyFor = { 'Espionage', 'Kidnapping', 'Threatening a protected person' }
+        },
+
+        -- Plea bargaining. The prosecution offers a reduced sentence for a
+        -- guilty plea; the defendant takes it or goes to trial.
+        plea = {
+            enabled = true,
+            -- The fraction of the recommendation an accepted offer carries.
+            -- Bounded so a bargain is a discount, not an acquittal.
+            minimumFactor = 0.4,
+            maximumFactor = 0.9
+        },
+
+        -- Continuances. A judge can put a case back for lack of a party.
+        continuance = { enabled = true, limit = 2 }
     },
 
     -- Jail. The court decides the sentence; this is where it is served.

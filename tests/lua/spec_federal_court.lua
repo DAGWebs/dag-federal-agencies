@@ -587,3 +587,223 @@ test('the court can be switched off entirely', function()
     local _, message = fileCase(1)
     assertEq(message, 'the court process is disabled')
 end)
+
+-- Bail, plea bargaining and continuances -----------------------------------------
+
+-- Sets up a case at arraignment with a real judge on the bench.
+local function arraigned(charges)
+    agent(1, 2)
+    player(2, 'judge', 0, 'Judge Amari')
+    harness.identifiers[4] = 'license:defendant'
+    harness.names[4] = 'Sam Cole'
+    harness.setJob(4, 'unemployed', 0)
+    harness.placePlayer(4, vector3(240.0, -1380.0, 39.5))
+
+    local case = fileCase(1, charges)
+    DAG.Federal.Court.TakeRole(2, case.id, 'judge')
+    DAG.Federal.Court.Progress(DAG.Federal.Court.Get(case.id))
+    return case
+end
+
+test('bail is priced from the charges and set by the judge', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+
+    -- 25000 fine at the 0.35 multiplier.
+    assertEq(DAG.Federal.Court.BailAmount(DAG.Federal.Court.Get(case.id)), 8750)
+    assertEq(DAG.Federal.Court.SetBail(2, case.id).bail.amount, 8750)
+end)
+
+test('only the judge sets bail, and only at arraignment', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+
+    local _, wrongPerson = DAG.Federal.Court.SetBail(1, case.id)
+    assertEq(wrongPerson, 'only the presiding judge may set bail')
+
+    local stored = DAG.Federal.Court.Get(case.id)
+    stored.stage = 'trial'
+    DAG.Federal.Court.cases.save(stored.id, stored)
+    local _, tooLate = DAG.Federal.Court.SetBail(2, case.id)
+    assertEq(tooLate, 'bail is set at arraignment')
+end)
+
+test('the gravest charges are not bailable', function()
+    loadCourt()
+    local case = arraigned({ 'Espionage' })
+
+    assertNil(DAG.Federal.Court.BailAmount(DAG.Federal.Court.Get(case.id)))
+    local _, message = DAG.Federal.Court.SetBail(2, case.id)
+    assertEq(message, 'Espionage is not a bailable charge')
+end)
+
+test('posting bail costs the money and releases from custody', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+    DAG.Federal.Court.SetBail(2, case.id)
+    DAG.Framework.AddMoney(4, 'bank', 20000, 'test')
+
+    assertEq(DAG.Federal.Court.PostBail(4, case.id).bail.status, 'posted')
+    assertEq(DAG.Framework.GetMoney(4, 'bank'), 11250)
+end)
+
+test('a defendant who cannot pay stays inside', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+    DAG.Federal.Court.SetBail(2, case.id)
+
+    local _, message = DAG.Federal.Court.PostBail(4, case.id)
+    assertEq(message, 'you cannot afford that')
+    assertEq(DAG.Federal.Court.Get(case.id).bail.status, 'set')
+end)
+
+test('only the defendant posts their own bail', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+    DAG.Federal.Court.SetBail(2, case.id)
+    DAG.Framework.AddMoney(1, 'bank', 20000, 'test')
+
+    local _, message = DAG.Federal.Court.PostBail(1, case.id)
+    assertEq(message, 'only the defendant may post their own bail')
+end)
+
+-- Skipping bail has to cost more than it saves.
+test('failing to appear forfeits bail and draws a bench warrant', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+    DAG.Federal.Court.SetBail(2, case.id)
+    DAG.Framework.AddMoney(4, 'bank', 20000, 'test')
+    DAG.Federal.Court.PostBail(4, case.id)
+
+    local forfeited = DAG.Federal.Court.ForfeitBail(case.id)
+    assertEq(forfeited.bail.status, 'forfeit')
+
+    local warrant = DAG.Federal.CAD.ActiveWarrantFor('license:defendant')
+    assertTrue(warrant ~= nil, 'the court came looking')
+    assertEq(warrant.charges[1], 'Failure to appear')
+    assertEq(DAG.Framework.GetMoney(4, 'bank'), 11250, 'the money is not refunded')
+end)
+
+test('bail is forfeit on the clock, whoever is presiding', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+    DAG.Federal.Court.SetBail(2, case.id)
+    DAG.Framework.AddMoney(4, 'bank', 20000, 'test')
+    DAG.Federal.Court.PostBail(4, case.id)
+
+    DAG.Federal.Court.Tick(os.time())
+    assertEq(DAG.Federal.Court.Get(case.id).bail.status, 'posted', 'not yet')
+
+    DAG.Federal.Court.Tick(os.time() + 3600)
+    assertEq(DAG.Federal.Court.Get(case.id).bail.status, 'forfeit')
+end)
+
+test('an offer is bounded so a bargain is a discount, not an acquittal', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+
+    -- 36 months recommended; an absurd offer is clamped to the floor.
+    local offered = DAG.Federal.Court.OfferPlea(1, case.id, 0.01)
+    assertEq(offered.offer.factor, 0.4)
+    assertEq(offered.offer.months, 14)
+
+    local generous = DAG.Federal.Court.OfferPlea(1, case.id, 5.0)
+    assertEq(generous.offer.factor, 0.9)
+end)
+
+test('only the prosecution side may offer a deal', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+
+    -- The defendant cannot offer themselves one.
+    local _, message = DAG.Federal.Court.OfferPlea(4, case.id, 0.5)
+    assertEq(message, 'only the prosecution may offer a deal')
+end)
+
+-- Taking a deal skips the jury entirely; that is the whole point of it.
+test('accepting an offer convicts on the agreed terms without a jury', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+    DAG.Federal.Court.OfferPlea(1, case.id, 0.5)
+
+    local closed = DAG.Federal.Court.AcceptPlea(4, case.id)
+    assertEq(closed.stage, 'closed')
+    assertEq(closed.verdict, 'guilty')
+    assertEq(closed.plea, 'guilty')
+    assertEq(closed.sentence.months, 18, 'half of the 36-month recommendation')
+    assertEq(closed.sentence.by, 'Plea agreement')
+    assertNil(closed.tally, 'the jury was never troubled')
+end)
+
+-- An agreed sentence is not subject to the judge's discretion band: clamping
+-- it would undo the bargain.
+test('an agreed sentence is not clamped by the judge discretion band', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+    -- The floor of the band is 18 months; the deal is worth less than that.
+    DAG.Federal.Court.OfferPlea(1, case.id, 0.4)
+
+    local closed = DAG.Federal.Court.AcceptPlea(4, case.id)
+    assertEq(closed.sentence.months, 14, 'the bargained figure survived')
+end)
+
+test('rejecting an offer leaves the case to be tried', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+    DAG.Federal.Court.OfferPlea(1, case.id, 0.5)
+
+    local rejected = DAG.Federal.Court.RejectPlea(4, case.id)
+    assertEq(rejected.offer.status, 'rejected')
+    assertEq(rejected.stage, 'arraignment', 'still to be tried')
+
+    local _, message = DAG.Federal.Court.AcceptPlea(4, case.id)
+    assertEq(message, 'there is no offer on the table')
+end)
+
+test('only the defence side may answer an offer', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+    DAG.Federal.Court.OfferPlea(1, case.id, 0.5)
+
+    local _, message = DAG.Federal.Court.AcceptPlea(1, case.id)
+    assertEq(message, 'only the defendant or their counsel may accept')
+end)
+
+test('plea bargaining can be switched off', function()
+    loadCourt()
+    Config.Federal.court.plea.enabled = false
+    local case = arraigned({ 'Wire fraud' })
+
+    local _, message = DAG.Federal.Court.OfferPlea(1, case.id, 0.5)
+    assertEq(message, 'plea bargaining is disabled')
+end)
+
+-- Otherwise a defendant with a patient lawyer never stands trial.
+test('continuances are limited', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+
+    assertEq(DAG.Federal.Court.Continue(2, case.id, 'Defence counsel absent').continuances, 1)
+    assertEq(DAG.Federal.Court.Continue(2, case.id, 'Again').continuances, 2)
+
+    local _, message = DAG.Federal.Court.Continue(2, case.id, 'Once more')
+    assertEq(message, 'this case has already been put back 2 times')
+end)
+
+test('only the judge grants a continuance', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+
+    local _, message = DAG.Federal.Court.Continue(1, case.id, 'Please')
+    assertEq(message, 'only the presiding judge may grant a continuance')
+end)
+
+test('a continuance resets the clock the NPC judge runs on', function()
+    loadCourt()
+    local case = arraigned({ 'Wire fraud' })
+    local before = DAG.Federal.Court.Get(case.id).stageAt
+
+    DAG.Federal.Court.Continue(2, case.id, 'Witness unavailable')
+    assertTrue(DAG.Federal.Court.Get(case.id).stageAt >= before)
+    assertEq(DAG.Federal.Court.Get(case.id).stage, 'arraignment', 'it did not move on')
+end)

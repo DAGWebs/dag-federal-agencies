@@ -203,6 +203,28 @@ function Court.Case(caseId)
         if case.plea then
             options[#options + 1] = { title = ('Plea: %s'):format((case.plea):gsub('_', ' ')), disabled = true }
         end
+        if case.bail then
+            options[#options + 1] = {
+                title = ('Bail: $%d'):format(case.bail.amount or 0),
+                description = case.bail.status,
+                badgeTone = case.bail.status == 'forfeit' and 'danger'
+                    or (case.bail.status == 'posted' and 'success' or nil),
+                disabled = true
+            }
+        end
+        if case.offer then
+            options[#options + 1] = {
+                title = ('Offer: %d months, $%d'):format(case.offer.months or 0, case.offer.fine or 0),
+                description = case.offer.status,
+                disabled = true
+            }
+        end
+        if (case.continuances or 0) > 0 then
+            options[#options + 1] = {
+                title = ('Put back %d time(s)'):format(case.continuances),
+                disabled = true
+            }
+        end
         if case.verdict then
             options[#options + 1] = {
                 title = ('Verdict: %s'):format((case.verdict):gsub('_', ' ')),
@@ -275,6 +297,77 @@ function Court.Actions(case)
                 end
             }
         end
+    end
+
+    -- Bail, offered at arraignment and answered by the defendant.
+    if case.stage == 'arraignment' then
+        if not case.bail then
+            options[#options + 1] = {
+                title = 'Set bail',
+                description = 'Presiding judge only',
+                icon = 'cash',
+                onSelect = function()
+                    DAG.Menu.Input('Set bail', { { name = 'amount', label = 'Amount', type = 'number' } },
+                        function(values)
+                            if not values then return end
+                            TriggerServerEvent(Federal.Net('court:bail'), case.id,
+                                tonumber(values.amount or values[1]))
+                            Court.Case(case.id)
+                        end)
+                end
+            }
+        elseif case.bail.status == 'set' then
+            options[#options + 1] = {
+                title = ('Post bail: $%d'):format(case.bail.amount),
+                description = 'The defendant walks until the trial',
+                icon = 'cash',
+                badgeTone = 'accent',
+                onSelect = function()
+                    TriggerServerEvent(Federal.Net('court:postBail'), case.id)
+                    Court.Case(case.id)
+                end
+            }
+        end
+    end
+
+    -- A deal, offered by the prosecution and answered by the defence.
+    if case.stage == 'arraignment' or case.stage == 'trial' then
+        options[#options + 1] = {
+            title = 'Offer a plea deal',
+            description = 'Prosecution only',
+            icon = 'info',
+            onSelect = function()
+                DAG.Menu.Input('Offer a deal', {
+                    { name = 'factor', label = 'Fraction of the recommendation (0.4 - 0.9)', default = '0.6' }
+                }, function(values)
+                    if not values then return end
+                    TriggerServerEvent(Federal.Net('court:offer'), case.id,
+                        tonumber(values.factor or values[1]))
+                    Court.Case(case.id)
+                end)
+            end
+        }
+    end
+
+    if case.offer and case.offer.status == 'open' then
+        options[#options + 1] = {
+            title = ('Accept: %d months, $%d'):format(case.offer.months, case.offer.fine),
+            description = ('Offered by %s'):format(case.offer.by or 'the prosecution'),
+            icon = 'check',
+            badgeTone = 'success',
+            onSelect = function()
+                TriggerServerEvent(Federal.Net('court:acceptOffer'), case.id)
+                Court.Case(case.id)
+            end
+        }
+        options[#options + 1] = {
+            title = 'Reject the offer',
+            icon = 'close',
+            onSelect = function()
+                TriggerServerEvent(Federal.Net('court:rejectOffer'), case.id)
+                Court.Case(case.id)
+            end
+        }
     end
 
     if case.stage == 'trial' then
@@ -357,6 +450,20 @@ function Court.Actions(case)
             end
         }
     end
+
+    options[#options + 1] = {
+        title = 'Put the case back',
+        description = 'Presiding judge only',
+        icon = 'chevron',
+        onSelect = function()
+            DAG.Menu.Input('Continuance', { { name = 'reason', label = 'Reason', required = true } },
+                function(values)
+                    if not values then return end
+                    TriggerServerEvent(Federal.Net('court:continue'), case.id, values.reason or values[1])
+                    Court.Case(case.id)
+                end)
+        end
+    }
 
     options[#options + 1] = {
         title = 'Stand down from your role',

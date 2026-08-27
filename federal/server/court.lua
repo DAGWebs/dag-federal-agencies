@@ -626,6 +626,247 @@ function Court.Strength(case)
     return Util.Clamp(strength, 0.05, 0.95)
 end
 
+-- Bail ---------------------------------------------------------------------------------------
+
+local function bailSettings()
+    return settings().bail or {}
+end
+
+-- What it costs this defendant to walk until trial, or nil when the charges
+-- are not bailable.
+function Court.BailAmount(case)
+    local bail = bailSettings()
+    if bail.enabled == false then return nil end
+
+    for _, charge in ipairs(case.charges or {}) do
+        if Util.Contains(bail.denyFor or {}, charge) then return nil, charge end
+    end
+
+    local recommendation = Court.Recommendation(case)
+    local amount = math.floor(recommendation.fine * (tonumber(bail.multiplier) or 0.35))
+    return math.floor(Util.Clamp(amount, tonumber(bail.minimum) or 500, tonumber(bail.maximum) or 100000))
+end
+
+function Court.SetBail(source, caseId, amount)
+    local case = cases.get(caseId)
+    if not case then return fail('no such case') end
+    if not presiding(source, case) then return fail('only the presiding judge may set bail') end
+    if case.stage ~= 'arraignment' then return fail('bail is set at arraignment') end
+    if case.bail and case.bail.status == 'posted' then return fail('bail has already been posted') end
+
+    local recommended, blocked = Court.BailAmount(case)
+    if not recommended then
+        return fail(blocked and ('%s is not a bailable charge'):format(blocked) or 'bail is disabled')
+    end
+
+    local bail = bailSettings()
+    local value = math.floor(Util.Clamp(tonumber(amount) or recommended,
+        tonumber(bail.minimum) or 500, tonumber(bail.maximum) or 100000))
+
+    case.bail = { amount = value, status = 'set', setBy = Bridge.GetName(source), at = now() }
+    case.transcript[#case.transcript + 1] = {
+        role = 'judge',
+        actor = Bridge.GetName(source),
+        text = ('Bail set at $%d.'):format(value),
+        at = now()
+    }
+    cases.save(case.id, case)
+    return case
+end
+
+function Court.PostBail(source, caseId)
+    local case = cases.get(caseId)
+    if not case then return fail('no such case') end
+    if not case.bail or case.bail.status ~= 'set' then return fail('no bail has been set') end
+
+    local identifier = Bridge.GetIdentifier(source)
+    if case.defendant.identifier ~= identifier and not Core.IsAdmin(source) then
+        return fail('only the defendant may post their own bail')
+    end
+
+    local account = bailSettings().account or 'bank'
+    if not Bridge.RemoveMoney(source, account, case.bail.amount, 'federal-bail') then
+        return fail('you cannot afford that')
+    end
+
+    case.bail.status = 'posted'
+    case.bail.postedAt = now()
+    case.bail.appearBy = now() + (tonumber(bailSettings().appearBy) or 1800)
+    cases.save(case.id, case)
+
+    -- Out until the trial: a defendant on bail is released from custody.
+    if Federal.Jail and Federal.Jail.Record(case.defendant.identifier) then
+        Federal.Jail.Release(case.defendant.identifier, ('Released on bail for %s'):format(case.number))
+    end
+
+    Bridge.Notify(source, ('Bail posted. Appear for %s or it is forfeit.'):format(case.number), 'inform')
+    return case
+end
+
+-- Bail is forfeit when the defendant never comes back, and a bench warrant
+-- follows: skipping bail has to cost more than it saves.
+function Court.ForfeitBail(caseId)
+    local case = cases.get(caseId)
+    if not case or not case.bail or case.bail.status ~= 'posted' then return nil end
+
+    case.bail.status = 'forfeit'
+    case.bail.forfeitAt = now()
+    case.transcript[#case.transcript + 1] = {
+        role = 'judge',
+        actor = 'The court',
+        text = 'The defendant failed to appear. Bail is forfeit.',
+        at = now()
+    }
+    cases.save(case.id, case)
+
+    if not CAD.ActiveWarrantFor(case.defendant.identifier) then
+        local number, sequence = Core.NextNumber(case.agency or 'fib', 'warrant')
+        CAD.warrants.save(Util.RecordId('wnt', sequence), {
+            id = Util.RecordId('wnt', sequence),
+            number = number,
+            agency = case.agency or 'fib',
+            target = { identifier = case.defendant.identifier, name = case.defendant.name },
+            reason = ('Failure to appear on %s'):format(case.number),
+            charges = { 'Failure to appear' },
+            status = 'active',
+            issuedBy = 'The court',
+            createdAt = now()
+        })
+    end
+
+    CAD.Note(case.defendant.identifier, case.defendant.name,
+        ('Bail forfeit on %s; bench warrant issued'):format(case.number))
+    return case
+end
+
+-- Plea bargaining -------------------------------------------------------------------------------
+
+-- The prosecution offers a reduced sentence for a guilty plea. Bounded so a
+-- bargain is a discount rather than an acquittal.
+function Court.OfferPlea(source, caseId, factor)
+    if (settings().plea or {}).enabled == false then return fail('plea bargaining is disabled') end
+
+    local case = cases.get(caseId)
+    if not case then return fail('no such case') end
+    if case.stage ~= 'arraignment' and case.stage ~= 'trial' then
+        return fail('an offer is made before the jury retires')
+    end
+
+    local identifier = Bridge.GetIdentifier(source)
+    local prosecutor = case.roles.prosecutor
+    local isProsecution = prosecutor and prosecutor.identifier == identifier
+    if not isProsecution and not Court.CanFile(source) and not Core.IsAdmin(source) then
+        return fail('only the prosecution may offer a deal')
+    end
+
+    local plea = settings().plea or {}
+    local bounded = Util.Clamp(tonumber(factor) or 0.6,
+        tonumber(plea.minimumFactor) or 0.4, tonumber(plea.maximumFactor) or 0.9)
+
+    local recommendation = Court.Recommendation(case)
+    case.offer = {
+        factor = bounded,
+        months = math.floor(recommendation.months * bounded),
+        fine = math.floor(recommendation.fine * bounded),
+        by = Bridge.GetName(source),
+        at = now(),
+        status = 'open'
+    }
+    case.transcript[#case.transcript + 1] = {
+        role = 'prosecutor',
+        actor = Bridge.GetName(source),
+        text = ('Offer: plead guilty for %d months and $%d.'):format(case.offer.months, case.offer.fine),
+        at = now()
+    }
+
+    cases.save(case.id, case)
+    return case
+end
+
+-- Accepting is a conviction on the agreed terms: it skips the jury entirely,
+-- which is the whole point of taking a deal.
+function Court.AcceptPlea(source, caseId)
+    local case = cases.get(caseId)
+    if not case then return fail('no such case') end
+    if not case.offer or case.offer.status ~= 'open' then return fail('there is no offer on the table') end
+
+    local identifier = Bridge.GetIdentifier(source)
+    local isDefendant = case.defendant.identifier == identifier
+    local isDefense = case.roles.defense and case.roles.defense.identifier == identifier
+    if not isDefendant and not isDefense and not Core.IsAdmin(source) then
+        return fail('only the defendant or their counsel may accept')
+    end
+
+    case.offer.status = 'accepted'
+    case.plea = 'guilty'
+    case.verdict = 'guilty'
+    case.stage = 'verdict'
+    case.stageAt = now()
+    case.transcript[#case.transcript + 1] = {
+        role = isDefense and 'defense' or 'defendant',
+        actor = Bridge.GetName(source),
+        text = 'The offer is accepted.',
+        at = now()
+    }
+    cases.save(case.id, case)
+
+    -- Sentenced on the agreed terms rather than the recommendation, and the
+    -- agreed terms are exempt from the judge's discretion band because they
+    -- were bargained rather than imposed.
+    return Court.ApplySentence(cases.get(case.id), case.offer.months, case.offer.fine, 'Plea agreement', true)
+end
+
+function Court.RejectPlea(source, caseId)
+    local case = cases.get(caseId)
+    if not case or not case.offer or case.offer.status ~= 'open' then return fail('there is no offer on the table') end
+
+    local identifier = Bridge.GetIdentifier(source)
+    local isDefendant = case.defendant.identifier == identifier
+    local isDefense = case.roles.defense and case.roles.defense.identifier == identifier
+    if not isDefendant and not isDefense and not Core.IsAdmin(source) then
+        return fail('only the defendant or their counsel may reject')
+    end
+
+    case.offer.status = 'rejected'
+    case.transcript[#case.transcript + 1] = {
+        role = isDefense and 'defense' or 'defendant',
+        actor = Bridge.GetName(source),
+        text = 'The offer is rejected.',
+        at = now()
+    }
+    cases.save(case.id, case)
+    return case
+end
+
+-- Continuances -----------------------------------------------------------------------------------
+
+-- Putting a case back because a party is missing. Limited, or a defendant with
+-- a patient lawyer never stands trial.
+function Court.Continue(source, caseId, reason)
+    if (settings().continuance or {}).enabled == false then return fail('continuances are disabled') end
+
+    local case = cases.get(caseId)
+    if not case then return fail('no such case') end
+    if not presiding(source, case) then return fail('only the presiding judge may grant a continuance') end
+    if case.stage == 'closed' then return fail('that case is closed') end
+
+    local limit = tonumber((settings().continuance or {}).limit) or 2
+    local used = tonumber(case.continuances) or 0
+    if used >= limit then return fail(('this case has already been put back %d times'):format(limit)) end
+
+    case.continuances = used + 1
+    case.stageAt = now()
+    case.transcript[#case.transcript + 1] = {
+        role = 'judge',
+        actor = Bridge.GetName(source),
+        text = ('Continued (%d of %d): %s'):format(case.continuances, limit,
+            Util.Text(reason, 200, 'no reason given')),
+        at = now()
+    }
+    cases.save(case.id, case)
+    return case
+end
+
 -- Deliberation and verdict ------------------------------------------------------------------
 
 function Court.Vote(source, caseId, guilty)
@@ -731,10 +972,12 @@ function Court.Sentence(source, caseId, months, fine)
 end
 
 -- Shared by the real judge and the NPC one, so both produce the same record.
-function Court.ApplySentence(case, months, fine, byName)
+function Court.ApplySentence(case, months, fine, byName, agreed)
     local bounds = settings().sentencing or {}
     local recommendation = Court.Recommendation(case)
-    local discretion = tonumber(bounds.judgeDiscretion) or 0.5
+    -- An agreed sentence is not subject to the discretion band: it was
+    -- bargained rather than imposed, and clamping it would undo the bargain.
+    local discretion = agreed and 1.0 or (tonumber(bounds.judgeDiscretion) or 0.5)
 
     -- A judge may depart from the recommendation, but only within the
     -- configured band: sentencing is discretionary, not arbitrary.
@@ -913,6 +1156,12 @@ function Court.Tick(nowSeconds)
 
     for _, case in pairs(cases.all()) do
         if case.stage ~= 'closed' then
+            -- Bail runs on wall-clock time regardless of who is presiding.
+            if case.bail and case.bail.status == 'posted'
+                and case.bail.appearBy and nowSeconds >= case.bail.appearBy then
+                Court.ForfeitBail(case.id)
+            end
+
             Court.EnsureJudge(case.id)
             local current = cases.get(case.id)
             local judge = current.roles.judge
@@ -988,6 +1237,16 @@ courtEvent('vote', Court.Vote, function() return 'Your vote is recorded.' end)
 courtEvent('sentence', Court.Sentence, function(case)
     return ('Sentence passed: %d months, $%d.'):format(case.sentence.months, case.sentence.fine)
 end)
+courtEvent('bail', Court.SetBail, function(case) return ('Bail set at $%d.'):format(case.bail.amount) end)
+courtEvent('postBail', Court.PostBail, function(case) return ('Bail of $%d posted.'):format(case.bail.amount) end)
+courtEvent('offer', Court.OfferPlea, function(case)
+    return ('Offered %d months and $%d.'):format(case.offer.months, case.offer.fine)
+end)
+courtEvent('acceptOffer', Court.AcceptPlea, function(case)
+    return ('Agreed: %d months, $%d.'):format(case.sentence.months, case.sentence.fine)
+end)
+courtEvent('rejectOffer', Court.RejectPlea, function() return 'The offer is rejected.' end)
+courtEvent('continue', Court.Continue, function(case) return ('Case put back (%d).'):format(case.continuances) end)
 courtEvent('houseSave', Court.SaveCourthouse, function(house) return ('Saved %s.'):format(house.label) end)
 courtEvent('houseDelete', Court.DeleteCourthouse, function(house) return ('Deleted %s.'):format(house.label) end)
 courtEvent('seatSave', Court.SaveSeat, function(seat) return ('Placed %s.'):format(seat.label) end)

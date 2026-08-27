@@ -138,6 +138,38 @@ Config.Federal = {
     -- Evidence lab. `analysisTime` is how long the lab bench takes, in ms.
     evidence = { analysisTime = 12000 },
 
+    -- Reports from the public. Callouts on a timer are the same seven cases
+    -- forever; a player who calls something in is the only source of work
+    -- nobody could have predicted.
+    reports = {
+        enabled = true,
+        -- Anyone can call. Set a list of job names to restrict it.
+        jobs = nil,
+        -- Seconds a caller must wait between reports, so the line cannot be
+        -- flooded.
+        cooldown = 60,
+        -- Reports older than this are dropped from the board, in seconds.
+        expire = 1800,
+        -- An anonymous tip withholds the caller from the board. It is still
+        -- recorded server-side so abuse can be traced.
+        allowAnonymous = true,
+        -- A report matching one of these keywords escalates to a real callout
+        -- of that template, if the template applies to an agency with units on
+        -- duty. This is what turns a phone call into dispatchable work.
+        escalate = {
+            ['fraud'] = 'wire-fraud',
+            ['counterfeit'] = 'counterfeit-passing',
+            ['forged'] = 'counterfeit-passing',
+            ['gun'] = 'unlicensed-transfer',
+            ['firearm'] = 'unlicensed-transfer',
+            ['weapons'] = 'unlicensed-transfer',
+            ['threat'] = 'protectee-threat',
+            ['kidnap'] = 'informant-dark',
+            ['missing'] = 'informant-dark',
+            ['stolen'] = 'stolen-federal-property'
+        }
+    },
+
     -- Investigation callouts. See federal/config/callouts.lua for templates.
     callouts = {
         enabled = true,

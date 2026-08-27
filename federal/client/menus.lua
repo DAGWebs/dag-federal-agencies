@@ -39,6 +39,7 @@ function Menus.Open()
         { title = 'Field', header = true },
         { title = 'LEO actions', icon = 'lock', onSelect = Menus.Actions },
         { title = 'Active callouts', icon = 'info', onSelect = Federal.Callouts.Menu },
+        { title = 'Reported incidents', icon = 'info', onSelect = Federal.Reports.Board },
         { title = 'Set your status', icon = 'user', onSelect = Federal.CAD.StatusMenu }
     }
 

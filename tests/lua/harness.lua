@@ -54,6 +54,7 @@ function harness.reset()
     harness.pedProps = {}
     harness.pedIsMale = false
     harness.pedIsDead = false
+    harness.waypoint = nil
     harness.deadPeds = {}
     harness.freeAiming = false
     harness.speeds = {}
@@ -289,6 +290,7 @@ function _G.SetPedIntoVehicle(ped, vehicle, seat) harness.seated[ped] = { vehicl
 function _G.IsVehicleSeatFree() return true end
 function _G.PlaySoundFrontend(_, name) harness.sounds[#harness.sounds + 1] = name end
 function _G.IsEntityDead() return harness.pedIsDead == true end
+function _G.SetNewWaypoint(x, y) harness.waypoint = { x = x, y = y } end
 
 -- Suspect behaviour. Tasks are recorded rather than performed so a test can
 -- assert what a suspect decided to do.
@@ -474,7 +476,7 @@ function harness.loadFederalClient(opts)
     end
     for _, file in ipairs(opts.federal or {
         'state', 'progress', 'uniforms', 'actions', 'suspects', 'cad', 'armory',
-        'leads', 'callouts', 'court', 'personnel', 'editor', 'hud', 'menus', 'zones', 'bootstrap'
+        'reports', 'leads', 'callouts', 'court', 'personnel', 'editor', 'hud', 'menus', 'zones', 'bootstrap'
     }) do
         harness.load('federal/client/' .. file .. '.lua')
     end

@@ -22,6 +22,12 @@ RegisterCommand(Bridge.namespace .. ':fedcourt', function()
     Federal.Court.Docket()
 end, false)
 
+-- Open to everybody: restricting who may report a crime is a strange thing
+-- for a server to want, and it is the only source of work nobody planned.
+RegisterCommand(Bridge.namespace .. ':report', function()
+    Federal.Reports.Call()
+end, false)
+
 CreateThread(function()
     -- The framework needs a moment to report a player before the first context
     -- read means anything.

@@ -332,3 +332,138 @@ test('every named animation resolves to a dictionary and clip', function()
         assertTrue(type(animation.clip) == 'string' and animation.clip ~= '', name .. ' clip')
     end
 end)
+
+-- HUD ---------------------------------------------------------------------------
+
+test('the HUD stays hidden for somebody who is not in an agency', function()
+    loadClient()
+    assertFalse(DAG.Federal.Hud.Build().visible)
+end)
+
+-- Off duty it would be clutter on a civilian's screen.
+test('the HUD is hidden off duty unless the server asks for it', function()
+    loadClient()
+    DAG.Federal.State.Apply({
+        agencies = { DAG.Federal.Schema.Agency(Config.Federal.Agencies[1]) },
+        permissions = {},
+        membership = { agencyId = 'fib', grade = 2, rank = 'Special Agent', onDuty = false }
+    })
+    assertFalse(DAG.Federal.Hud.Build().visible)
+
+    Config.Federal.hud.offDuty = true
+    assertTrue(DAG.Federal.Hud.Build().visible)
+end)
+
+test('the HUD shows the unit, rank and status of an on-duty officer', function()
+    loadClient()
+    asAgent(2, {})
+    DAG.Federal.State.Apply({
+        agencies = { DAG.Federal.Schema.Agency(Config.Federal.Agencies[1]) },
+        permissions = {},
+        membership = {
+            agencyId = 'fib', grade = 2, rank = 'Senior Special Agent', onDuty = true,
+            unit = { callsign = 'ALPHA-1', status = 'enroute' }
+        }
+    })
+
+    local hud = DAG.Federal.Hud.Build()
+    assertTrue(hud.visible)
+    assertEq(hud.agency, 'FIB')
+    assertEq(hud.callsign, 'ALPHA-1')
+    assertEq(hud.rank, 'Senior Special Agent')
+    assertEq(hud.status, 'En route')
+    assertEq(hud.statusTone, 'accent')
+end)
+
+test('the HUD reflects being restrained', function()
+    loadClient()
+    asAgent(2, {})
+    assertFalse(DAG.Federal.Hud.Build().restrained)
+
+    TriggerEvent(DAG.Federal.Net('restraint'), { cuffed = true })
+    assertTrue(DAG.Federal.Hud.Build().restrained)
+end)
+
+test('the objective list marks done, current and pending', function()
+    loadClient()
+    local stages = {
+        { label = 'Arrive' }, { label = 'Interview' }, { label = 'Evidence' }, { label = 'Arrest' }
+    }
+    local list = DAG.Federal.Hud.Objectives({ stages = stages, stage = 3 })
+
+    local byLabel = {}
+    for _, entry in ipairs(list) do byLabel[entry.label] = entry.state end
+    assertEq(byLabel['Interview'], 'done')
+    assertEq(byLabel['Evidence'], 'current')
+    assertEq(byLabel['Arrest'], 'pending')
+end)
+
+-- A ten-stage case would otherwise fill the screen.
+test('the objective list is windowed around the current stage', function()
+    loadClient()
+    local stages = {}
+    for index = 1, 10 do stages[index] = { label = 'Stage ' .. index } end
+
+    local list = DAG.Federal.Hud.Objectives({ stages = stages, stage = 7 })
+    assertEq(#list, 4, 'capped at the configured window')
+    assertEq(list[1].label, 'Stage 6', 'starting one before the current objective')
+    assertEq(list[2].state, 'current')
+end)
+
+test('an attached callout appears on the HUD and clears when it closes', function()
+    loadClient()
+    asAgent(2, { 'actions.detain' })
+    DAG.Federal.State.Apply({
+        agencies = { DAG.Federal.Schema.Agency(Config.Federal.Agencies[1]) },
+        permissions = {},
+        membership = {
+            agencyId = 'fib', grade = 2, rank = 'Senior Special Agent', onDuty = true,
+            unit = { callsign = 'ALPHA-1', status = 'onscene' }
+        }
+    })
+
+    local me = GetPlayerServerId(PlayerId())
+    DAG.Federal.Callouts.Track({
+        id = 'cal-1', number = 'FIB-CAD-0001', label = 'Suspected wire fraud',
+        stage = 2, assigned = { me }, location = { x = 0.0, y = 0.0, z = 0.0 },
+        stages = { { id = 'arrive', label = 'Arrive' }, { id = 'interview', label = 'Interview the witness' } }
+    })
+
+    local hud = DAG.Federal.Hud.Build()
+    assertEq(hud.callout.number, 'FIB-CAD-0001')
+    assertEq(hud.callout.objectives[2].state, 'current')
+
+    TriggerEvent(DAG.Federal.Net('callout:closed'), { id = 'cal-1', number = 'FIB-CAD-0001' })
+    assertNil(DAG.Federal.Hud.Build().callout, 'the closed callout left the HUD')
+end)
+
+test('a callout somebody else is on does not appear on your HUD', function()
+    loadClient()
+    asAgent(2, { 'actions.detain' })
+    DAG.Federal.Callouts.Track({
+        id = 'cal-2', number = 'FIB-CAD-0002', label = 'Not yours',
+        stage = 1, assigned = { 999 }, location = { x = 0.0, y = 0.0, z = 0.0 }, stages = {}
+    })
+    assertNil(DAG.Federal.Hud.Build().callout)
+end)
+
+-- Pushing an identical frame every second is pure noise across the boundary.
+test('the HUD only pushes when something actually changed', function()
+    loadClient()
+    asAgent(2, {})
+    DAG.Federal.Hud.Refresh()
+
+    harness.nuiMessages = {}
+    assertFalse(DAG.Federal.Hud.Refresh(), 'nothing changed')
+    assertEq(#harness.nuiMessages, 0)
+
+    TriggerEvent(DAG.Federal.Net('restraint'), { cuffed = true })
+    assertTrue(#harness.nuiMessages > 0, 'a real change is pushed')
+end)
+
+test('the HUD can be switched off entirely', function()
+    loadClient()
+    asAgent(2, {})
+    Config.Federal.hud.enabled = false
+    assertFalse(DAG.Federal.Hud.Build().visible)
+end)

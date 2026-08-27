@@ -39,6 +39,7 @@ client_scripts {
     'federal/client/court.lua',
     'federal/client/personnel.lua',
     'federal/client/editor.lua',
+    'federal/client/hud.lua',
     'federal/client/menus.lua',
     'federal/client/zones.lua',
     'federal/client/bootstrap.lua',

@@ -108,6 +108,17 @@ Config.Federal = {
     -- Fines written from the CAD. Bounds are enforced on the server.
     fines = { account = 'bank', minimum = 50, maximum = 50000 },
 
+    -- On-screen duty HUD: callsign, status, rank and the current callout
+    -- objectives. Set enabled = false to run without it.
+    hud = {
+        enabled = true,
+        -- Show it off duty as well. Off by default: it is clutter on the
+        -- screen of somebody who has clocked out.
+        offDuty = false,
+        -- How many callout objectives to show around the current one.
+        objectives = 4
+    },
+
     -- How long each timed action takes, in ms. Nothing in this resource is
     -- instant: an action that resolves the frame you press E reads as a menu
     -- click and cannot be interrupted. Set any of these to 0 to skip the bar.

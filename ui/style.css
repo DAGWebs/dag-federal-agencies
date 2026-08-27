@@ -421,3 +421,148 @@ kbd {
     border: 1px solid var(--menu-border);
     background: var(--menu-surface-raised);
 }
+
+/* Duty HUD. Like the progress bar it lives outside .root, renders without the
+   menu open, and never takes input. */
+.hud {
+    position: fixed;
+    left: 1.6vw;
+    bottom: 22vh;
+    width: 240px;
+    padding: 11px 13px 12px;
+    border-radius: var(--menu-radius);
+    background: var(--menu-surface);
+    border: 1px solid var(--menu-border);
+    border-left: 3px solid var(--menu-accent);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);
+    color: var(--menu-text);
+    font-family: var(--menu-font);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 160ms ease;
+}
+
+.hud[hidden] { display: none; }
+.hud[data-open='true'] { opacity: 1; }
+
+.hud__unit {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 3px;
+}
+
+.hud__badge {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--menu-accent-soft);
+    color: var(--menu-accent);
+}
+
+.hud__callsign {
+    font-size: 13px;
+    font-weight: 600;
+    flex: 1;
+}
+
+.hud__status {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: var(--menu-surface-raised);
+    color: var(--menu-text-muted);
+}
+
+.hud__status[data-tone='success'] { color: var(--menu-success); }
+.hud__status[data-tone='accent']  { color: var(--menu-accent); }
+.hud__status[data-tone='danger']  { color: var(--menu-danger); }
+
+.hud__rank {
+    font-size: 11px;
+    color: var(--menu-text-faint);
+}
+
+.hud__callout {
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid var(--menu-divider);
+}
+
+.hud__callout[hidden] { display: none; }
+
+.hud__calloutHead {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.hud__calloutNumber {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--menu-accent);
+}
+
+.hud__calloutLabel {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--menu-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hud__objectives {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.hud__objective {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--menu-text-faint);
+}
+
+.hud__objective::before {
+    content: '○';
+    font-size: 9px;
+    line-height: 1.5;
+}
+
+.hud__objective[data-state='done'] { color: var(--menu-text-muted); }
+.hud__objective[data-state='done']::before { content: '●'; color: var(--menu-success); }
+
+.hud__objective[data-state='current'] {
+    color: var(--menu-text);
+    font-weight: 600;
+}
+.hud__objective[data-state='current']::before { content: '◉'; color: var(--menu-accent); }
+
+.hud__flag {
+    margin-top: 9px;
+    padding: 4px 7px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: center;
+    color: var(--menu-danger);
+    background: rgba(255, 107, 107, 0.12);
+}
+
+.hud__flag[hidden] { display: none; }

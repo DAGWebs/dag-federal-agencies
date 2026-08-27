@@ -188,6 +188,34 @@ class FederalLayoutTests(unittest.TestCase):
                 self.assertNotIn(name, source, f"{path.name} reads the client-only {name}")
 
 
+class InterfaceTests(unittest.TestCase):
+    """The NUI page is not exercised by the Lua suite, so these check the two
+    things that would otherwise fail silently in a browser: a script looking up
+    an element that is not there, and a message the page never handles."""
+
+    def setUp(self):
+        self.html = (ROOT / "ui/index.html").read_text()
+        self.js = (ROOT / "ui/app.js").read_text()
+
+    def test_every_element_lookup_resolves_to_an_id_in_the_page(self):
+        ids = set(re.findall(r'id="([^"]+)"', self.html))
+        for name in re.findall(r"getElementById\('([^']+)'\)", self.js):
+            self.assertIn(name, ids, f"app.js looks up #{name}, which the page does not define")
+
+    def test_every_message_the_client_sends_is_handled_by_the_page(self):
+        """SendNUIMessage actions raised in Lua must have a branch in app.js,
+        or the feature is silently inert."""
+        handled = set(re.findall(r"data\.action === '([^']+)'", self.js))
+        sent = set()
+        for path in list(ROOT.glob("federal/client/*.lua")) + list(ROOT.glob("modules/menu/*.lua")):
+            source = path.read_text()
+            for block in re.findall(r"SendNUIMessage\(\{(.*?)\}\)", source, re.DOTALL):
+                sent.update(re.findall(r"action\s*=\s*'([^']+)'", block))
+
+        for action in sorted(sent):
+            self.assertIn(action, handled, f"the UI has no branch for the '{action}' message")
+
+
 class ConventionTests(unittest.TestCase):
     def source_files(self):
         return {path: path.read_text() for path in ROOT.rglob("*.lua") if "tests" not in path.parts}

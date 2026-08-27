@@ -39,6 +39,13 @@
     <button data-sample="long">Long list &mdash; scrolling</button>
     <button data-sample="empty">Empty menu</button>
 
+    <h2>Federal overlays</h2>
+    <button data-overlay="hud">Duty HUD &mdash; on a callout</button>
+    <button data-overlay="hudQuiet">Duty HUD &mdash; no callout</button>
+    <button data-overlay="hudCuffed">Duty HUD &mdash; restrained</button>
+    <button data-overlay="hudOff">Hide the HUD</button>
+    <button data-overlay="progress">Progress bar &mdash; 6s search</button>
+
     <h2>Theme</h2>
     <input type="color" id="accent" value="#4c8dff">
     <select id="position">
@@ -54,7 +61,8 @@
     </select>
 
     <p class="note">Arrow keys, Enter, Backspace and Esc work inside the frame.
-    Click it first so it has keyboard focus.</p>
+    Click it first so it has keyboard focus. The HUD and progress bar render
+    without the menu open, exactly as they do in game.</p>
 </aside>
 
 <div class="stage"><iframe id="frame" src="../../ui/index.html"></iframe></div>
@@ -97,6 +105,34 @@ const SAMPLES = {
     empty: { title: 'Watchlist', subtitle: 'Nothing tracked yet', canGoBack: true, options: [] }
 };
 
+/* The federal overlays. These render independently of the menu and take no
+   input, which is why they are previewed separately from the samples above. */
+const OVERLAYS = {
+    hud: { action: 'hud', hud: {
+        visible: true, agency: 'FIB', callsign: 'ALPHA-1', rank: 'Senior Special Agent',
+        status: 'On scene', statusTone: 'accent', restrained: false,
+        callout: {
+            number: 'FIB-CAD-0007', label: 'Suspected wire fraud',
+            objectives: [
+                { label: 'Respond to the reporting business', state: 'done' },
+                { label: 'Interview the branch manager', state: 'done' },
+                { label: 'Recover the transfer records and prints', state: 'current' },
+                { label: 'Detain the account holder', state: 'pending' }
+            ]
+        }
+    } },
+    hudQuiet: { action: 'hud', hud: {
+        visible: true, agency: 'USSS', callsign: 'DETAIL-3', rank: 'Special Agent',
+        status: 'Available', statusTone: 'success', restrained: false
+    } },
+    hudCuffed: { action: 'hud', hud: {
+        visible: true, agency: 'DOA', callsign: 'INSP-2', rank: 'Field Inspector',
+        status: 'Panic', statusTone: 'danger', restrained: true
+    } },
+    hudOff: { action: 'hud', hud: { visible: false } },
+    progress: { action: 'progress:open', label: 'Searching subject', duration: 6000, cancel: true }
+};
+
 const frame = document.getElementById('frame');
 let sample = 'garage';
 
@@ -115,6 +151,17 @@ function send() {
 frame.addEventListener('load', send);
 document.querySelectorAll('[data-sample]').forEach(btn =>
     btn.addEventListener('click', () => { sample = btn.dataset.sample; send(); }));
+
+document.querySelectorAll('[data-overlay]').forEach(btn =>
+    btn.addEventListener('click', () => {
+        const key = btn.dataset.overlay;
+        frame.contentWindow.postMessage(OVERLAYS[key], '*');
+        /* The bar closes itself in game when the Lua timer ends; here the
+           preview has to do it so the run is visible end to end. */
+        if (key === 'progress') {
+            setTimeout(() => frame.contentWindow.postMessage({ action: 'progress:close' }, '*'), 6000);
+        }
+    }));
 ['accent', 'position', 'width'].forEach(id =>
     document.getElementById(id).addEventListener('input', send));
 </script>

@@ -290,8 +290,56 @@
         }, 140);
     }
 
+    /* Duty HUD. Renders from a single state push; the client sends a new one
+       whenever anything in it changes rather than on a timer. */
+    var hudEl = document.getElementById('hud');
+    var hudAgency = document.getElementById('hudAgency');
+    var hudCallsign = document.getElementById('hudCallsign');
+    var hudStatus = document.getElementById('hudStatus');
+    var hudRank = document.getElementById('hudRank');
+    var hudCallout = document.getElementById('hudCallout');
+    var hudCalloutNumber = document.getElementById('hudCalloutNumber');
+    var hudCalloutLabel = document.getElementById('hudCalloutLabel');
+    var hudObjectives = document.getElementById('hudObjectives');
+    var hudRestrained = document.getElementById('hudRestrained');
+
+    function hudRender(data) {
+        if (!data || !data.visible) {
+            hudEl.dataset.open = 'false';
+            hudEl.hidden = true;
+            return;
+        }
+
+        hudEl.hidden = false;
+        requestAnimationFrame(function () { hudEl.dataset.open = 'true'; });
+
+        hudAgency.textContent = data.agency || 'FED';
+        hudCallsign.textContent = data.callsign || '';
+        hudStatus.textContent = data.status || '';
+        hudStatus.dataset.tone = data.statusTone || 'success';
+        hudRank.textContent = data.rank || '';
+        hudRestrained.hidden = !data.restrained;
+
+        var callout = data.callout;
+        hudCallout.hidden = !callout;
+        if (!callout) return;
+
+        hudCalloutNumber.textContent = callout.number || '';
+        hudCalloutLabel.textContent = callout.label || '';
+        hudObjectives.innerHTML = '';
+
+        (callout.objectives || []).forEach(function (objective) {
+            var item = document.createElement('li');
+            item.className = 'hud__objective';
+            item.dataset.state = objective.state || 'pending';
+            item.textContent = objective.label || '';
+            hudObjectives.appendChild(item);
+        });
+    }
+
     window.addEventListener('message', function (event) {
         var data = event.data || {};
+        if (data.action === 'hud') { hudRender(data.hud); return; }
         if (data.action === 'open') { applyTheme(data.theme); open(data.menu || {}); }
         else if (data.action === 'close') close(false);
         else if (data.action === 'theme') applyTheme(data.theme);
@@ -302,6 +350,7 @@
     // Exposed for the offline preview in tests/ui.
     window.__dagMenu = {
         open: open, close: close, applyTheme: applyTheme, state: state,
-        progressOpen: progressOpen, progressClose: progressClose
+        progressOpen: progressOpen, progressClose: progressClose,
+        hudRender: hudRender
     };
 })();

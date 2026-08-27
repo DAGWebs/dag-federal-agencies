@@ -474,7 +474,7 @@ function harness.loadFederalClient(opts)
     end
     for _, file in ipairs(opts.federal or {
         'state', 'progress', 'uniforms', 'actions', 'suspects', 'cad', 'armory',
-        'callouts', 'court', 'personnel', 'editor', 'menus', 'zones', 'bootstrap'
+        'callouts', 'court', 'personnel', 'editor', 'hud', 'menus', 'zones', 'bootstrap'
     }) do
         harness.load('federal/client/' .. file .. '.lua')
     end

@@ -124,6 +124,7 @@ end
 
 RegisterNetEvent(Federal.Net('restraint'), function(state)
     applyRestraint(state)
+    if Federal.Hud then Federal.Hud.Refresh() end
 end)
 
 RegisterNetEvent(Federal.Net('escort'), function(officer)

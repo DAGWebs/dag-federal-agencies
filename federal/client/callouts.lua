@@ -222,6 +222,15 @@ function Callouts.Track(callout)
         buildScene(callout)
     end
 
+    -- The HUD is the persistent copy of this; the notification is just the
+    -- nudge that it changed.
+    local me = GetPlayerServerId(PlayerId())
+    local assigned = false
+    for _, source in ipairs(callout.assigned or {}) do
+        if source == me then assigned = true end
+    end
+    if assigned then Federal.Hud.SetCallout(callout) end
+
     local stage = callout.stages and callout.stages[callout.stage]
     if stage then Bridge.Notify(('Objective: %s'):format(stage.label), 'inform') end
 end
@@ -300,6 +309,7 @@ function Callouts.Detail(calloutId)
             icon = 'close',
             onSelect = function()
                 TriggerServerEvent(Federal.Net('callout:detach'), calloutId)
+                Federal.Hud.ClearCallout(calloutId)
                 if scene.calloutId == calloutId then clearScene() end
             end
         }
@@ -337,6 +347,7 @@ end)
 RegisterNetEvent(Federal.Net('callout:closed'), function(callout)
     if type(callout) ~= 'table' then return end
     known[callout.id] = nil
+    Federal.Hud.ClearCallout(callout.id)
     if scene.calloutId == callout.id then clearScene() end
     Bridge.Notify(('%s closed.'):format(callout.number), 'success')
 end)

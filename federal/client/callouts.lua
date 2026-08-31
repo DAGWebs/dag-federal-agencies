@@ -45,7 +45,13 @@ local function spawnPed(model, coords, heading, calm)
     while not HasModelLoaded(hash) and GetGameTimer() < deadline do Wait(20) end
     if not HasModelLoaded(hash) then return nil end
 
-    local ped = CreatePed(4, hash, coords.x, coords.y, coords.z - 1.0, heading or 0.0, true, false)
+    -- On the ACTUAL ground: the old fixed z-1.0 buried peds on uneven or
+    -- part-streamed terrain and they fell through the world.
+    local groundZ = coords.z
+    local found, resolved = GetGroundZFor_3dCoord(coords.x, coords.y, coords.z + 5.0, false)
+    if found then groundZ = resolved end
+
+    local ped = CreatePed(4, hash, coords.x, coords.y, groundZ, heading or 0.0, true, false)
     SetModelAsNoLongerNeeded(hash)
     SetEntityAsMissionEntity(ped, true, true)
     SetPedDiesWhenInjured(ped, false)
@@ -126,6 +132,41 @@ local function placeEvidence(callout)
     end
 end
 
+-- One scene witness, separately stageable so the watchdog can bring back a
+-- witness the world lost - or whose model never loaded - without touching
+-- the suspect. A template typo in the model list must not cost the scene
+-- its witness, so unknown models fall back to a stock one.
+local function spawnWitness(callout, index)
+    local models = (callout.witnesses and callout.witnesses.models and #callout.witnesses.models > 0)
+        and callout.witnesses.models or { 'a_m_y_business_01' }
+    local model = models[((index - 1) % #models) + 1]
+    if not IsModelInCdimage(GetHashKey(model)) then model = 'a_m_y_business_01' end
+
+    local point = {
+        x = callout.location.x - 2.0 - index,
+        y = callout.location.y + 2.0,
+        z = callout.location.z
+    }
+    local ped = spawnPed(model, point, 180.0, true)
+    if not ped then return nil end
+
+    scene.witnesses = scene.witnesses or {}
+    scene.witnesses[index] = ped
+
+    local witnessId = ('federal:callout:%s:witness:%d'):format(callout.id, index)
+    DAG.Interactions.Remove(witnessId)
+    DAG.Interactions.Register({
+        id = witnessId,
+        coords = vector3(point.x, point.y, point.z),
+        follow = ped,
+        distance = 2.5,
+        label = 'Press ~INPUT_CONTEXT~ to interview',
+        onSelect = function() Callouts.Report(callout.id, 'interview') end
+    })
+    scene.interactions[#scene.interactions + 1] = witnessId
+    return ped
+end
+
 -- Builds the scene. Only the host does this.
 local function buildScene(callout)
     clearScene()
@@ -181,30 +222,137 @@ local function buildScene(callout)
 
     local witnesses = (callout.witnesses and callout.witnesses.count) or 0
     for index = 1, witnesses do
-        local models = (callout.witnesses.models and #callout.witnesses.models > 0)
-            and callout.witnesses.models or { 'a_m_y_business_01' }
-        local point = {
-            x = callout.location.x - 2.0 - index,
-            y = callout.location.y + 2.0,
-            z = callout.location.z
-        }
-        local ped = spawnPed(models[((index - 1) % #models) + 1], point, 180.0, true)
-
-        if ped then
-            local witnessId = ('federal:callout:%s:witness:%d'):format(callout.id, index)
-            DAG.Interactions.Register({
-                id = witnessId,
-                coords = vector3(point.x, point.y, point.z),
-                distance = 2.5,
-                label = 'Press ~INPUT_CONTEXT~ to interview',
-                onSelect = function() Callouts.Report(callout.id, 'interview') end
-            })
-            scene.interactions[#scene.interactions + 1] = witnessId
-        end
+        spawnWitness(callout, index)
     end
 
     placeEvidence(callout)
 end
+
+-- The host builds the scene, but never from across the map: peds created in
+-- unloaded world space fail to spawn or get culled, which is how a
+-- responder used to arrive at an empty scene. A far-away host gets the blip
+-- and route immediately, and the scene itself goes live on approach.
+local pendingSceneId = nil
+
+local function tryBuildScene(callout)
+    if type(callout.location) ~= 'table' then return end
+    local location = vector3(callout.location.x, callout.location.y, callout.location.z)
+    local distance = #(GetEntityCoords(PlayerPedId()) - location)
+
+    if distance <= 120.0 then
+        pendingSceneId = nil
+        buildScene(callout)
+        return
+    end
+
+    pendingSceneId = callout.id
+    clearScene()
+    scene.blip = Federal.Zones.AddBlip(callout.location, callout.label, callout.blip)
+    if scene.blip then SetBlipRoute(scene.blip, true) end
+    Bridge.Notify('Scene marked on your map - it goes live as you arrive.', 'inform', 6000)
+end
+
+-- One watchdog owns scene liveness for the host: it builds the pending
+-- scene on arrival, and REBUILDS when every actor is gone - which is what
+-- a build that fired before the area streamed in, or a world cull, leaves
+-- behind. A partial cast (an arrested suspect, say) is left alone.
+local sceneAttempts = {}
+
+CreateThread(function()
+    while true do
+        Wait(2000)
+        local me = GetPlayerServerId(PlayerId())
+        local hosting
+        for _, callout in pairs(known) do
+            if callout.host == me and callout.status ~= 'closed' and type(callout.location) == 'table' then
+                hosting = callout
+                break
+            end
+        end
+
+        if hosting then
+            local location = vector3(hosting.location.x, hosting.location.y, hosting.location.z)
+            if #(GetEntityCoords(PlayerPedId()) - location) <= 120.0 then
+                local needsBuild = scene.calloutId ~= hosting.id
+
+                if not needsBuild then
+                    local expected = ((hosting.suspect and hosting.suspect.kind == 'npc') and 1 or 0)
+                        + ((hosting.witnesses and hosting.witnesses.count) or 0)
+                    if expected > 0 then
+                        local alive = 0
+                        for _, ped in ipairs(scene.peds) do
+                            if DoesEntityExist(ped) then alive = alive + 1 end
+                        end
+                        if alive > 0 then sceneAttempts[hosting.id] = nil end
+                        needsBuild = alive == 0
+                    end
+
+                    -- Individual witnesses: restage any single one the world
+                    -- lost (or whose spawn failed), without a full rebuild.
+                    if not needsBuild then
+                        for index = 1, ((hosting.witnesses and hosting.witnesses.count) or 0) do
+                            local witness = scene.witnesses and scene.witnesses[index]
+                            if not witness or not DoesEntityExist(witness) then
+                                local attemptKey = hosting.id .. ':w' .. index
+                                local tries = (sceneAttempts[attemptKey] or 0) + 1
+                                sceneAttempts[attemptKey] = tries
+                                if tries <= 4 then spawnWitness(hosting, index) end
+                            end
+                        end
+                    end
+                end
+
+                if needsBuild then
+                    local attempts = (sceneAttempts[hosting.id] or 0) + 1
+                    sceneAttempts[hosting.id] = attempts
+                    if attempts <= 4 then
+                        local arriving = pendingSceneId == hosting.id
+                        pendingSceneId = nil
+                        buildScene(hosting)
+                        if arriving then Bridge.Notify('You are on scene.', 'inform') end
+                    elseif attempts == 5 then
+                        Bridge.Notify('The scene actors will not stage here - the location may be obstructed.', 'error', 8000)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- 'Arrive' objectives complete themselves: standing at the scene IS the
+-- report. Requiring a menu click to say "I am here" soft-locked every
+-- responder who reasonably went straight for the witness instead. Perimeter
+-- stages (arrive + deployed cordon) legitimately refuse until the cones are
+-- out, so attempts RETRY on a slow beat rather than firing once.
+local arriveAttempts = {}
+
+CreateThread(function()
+    while true do
+        Wait(1500)
+        local me = GetPlayerServerId(PlayerId())
+        for _, callout in pairs(known) do
+            if callout.status ~= 'closed' and type(callout.location) == 'table' then
+                local assigned = false
+                for _, source in ipairs(callout.assigned or {}) do
+                    if source == me then assigned = true break end
+                end
+
+                local stage = assigned and callout.stages and callout.stages[callout.stage] or nil
+                if stage and stage.kind == 'arrive' then
+                    local reportKey = ('%s:%s'):format(callout.id, tostring(callout.stage))
+                    local lastTry = arriveAttempts[reportKey] or 0
+                    if GetGameTimer() - lastTry >= 8000 then
+                        local location = vector3(callout.location.x, callout.location.y, callout.location.z)
+                        if #(GetEntityCoords(PlayerPedId()) - location) <= ((tonumber(stage.radius) or 25.0) + 5.0) then
+                            arriveAttempts[reportKey] = GetGameTimer()
+                            Callouts.Report(callout.id, stage.id)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
 
 -- Progress ---------------------------------------------------------------------------
 
@@ -218,8 +366,9 @@ function Callouts.Track(callout)
     if type(callout) ~= 'table' then return end
     known[callout.id] = callout
 
-    if callout.host == GetPlayerServerId(PlayerId()) and scene.calloutId ~= callout.id then
-        buildScene(callout)
+    if callout.host == GetPlayerServerId(PlayerId())
+        and scene.calloutId ~= callout.id and pendingSceneId ~= callout.id then
+        tryBuildScene(callout)
     end
 
     -- The HUD is the persistent copy of this; the notification is just the
@@ -237,6 +386,41 @@ end
 
 -- Menus ---------------------------------------------------------------------------------
 
+-- Pulling your own work: pick a template (or roll the dice) and the server
+-- dispatches it, bypassing the automatic population gate. Rate limited
+-- server-side so it cannot be spammed.
+function Callouts.Request()
+    Bridge.TriggerCallback(Federal.Net('callout:templates'), function(templates)
+        local options = { {
+            title = 'Surprise me',
+            description = 'A random case from your agency\'s catalog',
+            icon = 'info',
+            onSelect = function()
+                Bridge.TriggerCallback(Federal.Net('callout:force'), function(callout)
+                    if callout then Callouts.Menu() end
+                end, nil)
+            end
+        } }
+
+        for _, template in ipairs(templates or {}) do
+            options[#options + 1] = {
+                title = template.label,
+                description = template.description,
+                icon = 'chevron',
+                badge = ('P%d'):format(template.priority or 2),
+                badgeTone = (template.priority or 2) == 1 and 'danger' or nil,
+                onSelect = function()
+                    Bridge.TriggerCallback(Federal.Net('callout:force'), function(callout)
+                        if callout then Callouts.Menu() end
+                    end, template.id)
+                end
+            }
+        end
+
+        Federal.CAD.Show(id('request'), 'Request a callout', 'Dispatches to your whole agency', options)
+    end)
+end
+
 function Callouts.Menu()
     Bridge.TriggerCallback(Federal.Net('callouts'), function(list)
         local options = {}
@@ -252,6 +436,15 @@ function Callouts.Menu()
                 onSelect = function() Callouts.Detail(callout.id) end
             }
         end
+
+        options[#options + 1] = { title = 'Dispatch', header = true }
+        options[#options + 1] = {
+            title = 'Request a callout',
+            description = 'Pull a case now, whatever the automatic gate says',
+            icon = 'check',
+            onSelect = Callouts.Request
+        }
+
         Federal.CAD.Show(id('list'), 'Active callouts', ('%d running'):format(#(list or {})), options)
     end)
 end

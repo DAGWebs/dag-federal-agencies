@@ -359,6 +359,407 @@ function Actions.Swab()
     end, target)
 end
 
+-- Investigation: interviewing the world -------------------------------------
+--
+-- Any NPC near a crime scene can be questioned. The server owns their
+-- identity and what they say; this side finds the ped, holds them still,
+-- and renders the conversation.
+
+-- The closest human, non-player, living NPC.
+function Actions.NearestNPC(limit)
+    local player = PlayerPedId()
+    local origin = GetEntityCoords(player)
+    local best, bestDistance
+
+    for _, ped in ipairs(GetGamePool('CPed')) do
+        if ped ~= player and DoesEntityExist(ped) and not IsPedAPlayer(ped)
+            and IsPedHuman(ped) and not IsPedDeadOrDying(ped, true) and not IsPedInAnyVehicle(ped, true) then
+            local distance = #(origin - GetEntityCoords(ped))
+            if distance <= (limit or 3.0) and (not bestDistance or distance < bestDistance) then
+                best, bestDistance = ped, distance
+            end
+        end
+    end
+    return best
+end
+
+-- A stable key per ped for the session, so re-interviewing the same person
+-- gets the same identity back from the server.
+local npcKeys = {}
+local npcKeySequence = 0
+
+local function npcKey(ped)
+    if not npcKeys[ped] then
+        npcKeySequence = npcKeySequence + 1
+        npcKeys[ped] = ('npc%d-%d'):format(GetGameTimer() % 100000, npcKeySequence)
+    end
+    return npcKeys[ped]
+end
+
+-- Local physical state per ped: hands up, knocked down, cuffed. The server
+-- owns identity and attitude; the body language lives here.
+local npcState = {}
+
+local function pedState(ped)
+    npcState[ped] = npcState[ped] or {}
+    return npcState[ped]
+end
+
+-- A hostile reaction from the server: make the ped act on it.
+local function applyReaction(ped, reaction)
+    if not reaction or not DoesEntityExist(ped) then return end
+    SetBlockingOfNonTemporaryEvents(ped, false)
+    ClearPedTasks(ped)
+    if reaction == 'attack' then
+        TaskCombatPed(ped, PlayerPedId(), 0, 16)
+        Bridge.Notify('They turned on you!', 'error')
+    else
+        local coords = GetEntityCoords(ped)
+        TaskSmartFleePed(ped, PlayerPedId(), 120.0, 20000, false, false)
+        Bridge.Notify('They bolted!', 'error')
+        coords = nil
+    end
+end
+
+local function cuffPed(ped)
+    local state = pedState(ped)
+    ClearPedTasksImmediately(ped)
+    SetBlockingOfNonTemporaryEvents(ped, true)
+    RequestAnimDict('mp_arresting')
+    local deadline = GetGameTimer() + 1500
+    while not HasAnimDictLoaded('mp_arresting') and GetGameTimer() < deadline do Wait(10) end
+    if HasAnimDictLoaded('mp_arresting') then
+        TaskPlayAnim(ped, 'mp_arresting', 'idle', 8.0, -8.0, -1, 49, 0, false, false, false)
+    end
+    SetEnableHandcuffs(ped, true)
+    state.cuffed = true
+    state.hands = false
+    Bridge.Notify('Subject cuffed.', 'success')
+end
+
+local function showInterview(ped, result)
+    local state = pedState(ped)
+    result = result or state.lastResult or { name = 'Subject', statement = '...' }
+    state.lastResult = result
+    local attitude = result.attitude or 0
+    local mood = attitude >= 7 and 'Hostile' or attitude >= 4 and 'Agitated' or attitude >= 2 and 'Wary' or 'Cooperative'
+
+    local options = {
+        {
+            title = result.name,
+            description = ('DOB %s | %s'):format(result.dob or '?', result.identifier or ''),
+            badge = mood,
+            badgeTone = attitude >= 4 and 'danger' or (attitude >= 2 and 'accent' or 'success'),
+            disabled = true
+        },
+        { title = 'Statement', description = result.statement, icon = 'info', disabled = true }
+    }
+    if result.caseNumber then
+        options[#options + 1] = { title = ('Working case %s'):format(result.caseNumber), icon = 'info', disabled = true }
+    end
+    if result.lead then
+        options[#options + 1] = { title = result.lead, icon = 'check', badge = 'Lead', badgeTone = 'success', disabled = true }
+    end
+    if result.line then
+        options[#options + 1] = { title = 'Reaction', description = result.line, icon = 'info', disabled = true }
+    end
+
+    local key = npcKey(ped)
+    local function approach(tone)
+        Bridge.TriggerCallback(Federal.Net('investigate:approach'), function(response, err)
+            if not response then return Bridge.Notify(err or 'No response.', 'error') end
+            if response.reaction then
+                DAG.Menu.Close()
+                return applyReaction(ped, response.reaction)
+            end
+            result.attitude = response.attitude
+            result.line = response.line
+            showInterview(ped, result)
+        end, key, tone)
+    end
+
+    options[#options + 1] = { title = 'Approach', header = true }
+    options[#options + 1] = {
+        title = 'Reassure them',
+        description = 'Calm them down - cooperation improves',
+        icon = 'check',
+        onSelect = function() approach('calm') end
+    }
+    options[#options + 1] = {
+        title = 'Lean on them',
+        description = 'Pressure shakes details loose, and tempers fray',
+        icon = 'info',
+        badgeTone = 'danger',
+        onSelect = function() approach('hard') end
+    }
+    options[#options + 1] = {
+        title = 'Press for details',
+        description = 'Push them on what else they saw',
+        icon = 'info',
+        onSelect = function() Actions.InterviewPed(ped, true) end
+    }
+    options[#options + 1] = {
+        title = 'Take a formal statement',
+        description = result.caseNumber and ('Files onto %s as a witness'):format(result.caseNumber)
+            or 'Needs an open case scene nearby',
+        icon = 'check',
+        onSelect = function()
+            Bridge.TriggerCallback(Federal.Net('investigate:statement'), function(filed, err)
+                Bridge.Notify(filed
+                    and ('%s is on %s as a witness; statement filed.'):format(filed.name, filed.caseNumber)
+                    or (err or 'Refused.'), filed and 'success' or 'error', 8000)
+            end, key)
+        end
+    }
+
+    -- Enforcement: order, take down, cuff, book.
+    if State.Can('actions.detain') or State.Can('actions.arrest') then
+        options[#options + 1] = { title = 'Enforcement', header = true }
+    end
+
+    if State.Can('actions.arrest') and not state.cuffed and not state.hands and not state.subdued then
+        options[#options + 1] = {
+            title = 'Order: you are under arrest',
+            description = 'Verbal command - a hostile subject may bolt or swing',
+            icon = 'lock',
+            onSelect = function()
+                Bridge.TriggerCallback(Federal.Net('investigate:order'), function(response, err)
+                    if not response then return Bridge.Notify(err or 'Refused.', 'error') end
+                    result.attitude = response.attitude
+                    result.line = response.line
+                    if response.result == 'comply' then
+                        ClearPedTasksImmediately(ped)
+                        SetBlockingOfNonTemporaryEvents(ped, true)
+                        TaskHandsUp(ped, 30000, PlayerPedId(), -1, true)
+                        pedState(ped).hands = true
+                        showInterview(ped, result)
+                    else
+                        DAG.Menu.Close()
+                        applyReaction(ped, response.result)
+                    end
+                end, key)
+            end
+        }
+    end
+
+    if State.Can('actions.detain') and not state.cuffed and not state.subdued then
+        options[#options + 1] = {
+            title = 'Take them down',
+            description = 'Physical takedown - knocks them out cold',
+            icon = 'lock',
+            badgeTone = 'danger',
+            onSelect = function()
+                DAG.Menu.Close()
+                if #(GetEntityCoords(PlayerPedId()) - GetEntityCoords(ped)) > 2.5 then
+                    return Bridge.Notify('Get closer first.', 'error')
+                end
+                if not Federal.Progress.Run({ label = 'Taking them down', duration = 900, animation = 'frisk' }) then return end
+                SetBlockingOfNonTemporaryEvents(ped, true)
+                ClearPedTasksImmediately(ped)
+                SetPedToRagdoll(ped, 12000, 12000, 0, false, false, false)
+                pedState(ped).subdued = true
+                Bridge.Notify('Subject is down - cuff them.', 'success')
+                SetTimeout(600, function() showInterview(ped) end)
+            end
+        }
+    end
+
+    if State.Can('actions.detain') and (state.hands or state.subdued) and not state.cuffed then
+        options[#options + 1] = {
+            title = 'Cuff them',
+            icon = 'lock',
+            onSelect = function()
+                if not Federal.Progress.Run({ label = 'Applying cuffs', duration = 1800, animation = 'frisk' }) then return end
+                cuffPed(ped)
+                showInterview(ped)
+            end
+        }
+    end
+
+    if state.cuffed then
+        if State.Can('actions.arrest') then
+            options[#options + 1] = {
+                title = 'Book the arrest',
+                description = 'Files the arrest on their record (and the docket)',
+                icon = 'lock',
+                badgeTone = 'danger',
+                onSelect = function()
+                    local chargeOptions = {}
+                    for _, charge in ipairs((Config.Federal or {}).charges or {}) do
+                        chargeOptions[#chargeOptions + 1] = { value = charge, label = charge }
+                    end
+                    DAG.Menu.Input('Book the arrest', {
+                        { name = 'charge', label = 'Primary charge', type = 'select', required = true,
+                            options = chargeOptions, allowCustom = true },
+                        { name = 'extra', label = 'Further charges (comma separated)' }
+                    }, function(values)
+                        if not values then return end
+                        local charges = { values.charge }
+                        for charge in tostring(values.extra or ''):gmatch('[^,]+') do
+                            local trimmed = charge:gsub('^%s+', ''):gsub('%s+$', '')
+                            if trimmed ~= '' then charges[#charges + 1] = trimmed end
+                        end
+                        Bridge.TriggerCallback(Federal.Net('investigate:arrestNpc'), function(booking, err)
+                            Bridge.Notify(booking
+                                and ('%s booked%s.'):format(booking.name,
+                                    booking.caseNumber and (' - case %s filed'):format(booking.caseNumber) or '')
+                                or (err or 'Refused.'), booking and 'success' or 'error', 9000)
+                        end, key, charges)
+                    end)
+                end
+            }
+        end
+        options[#options + 1] = {
+            title = 'Seat them in the nearest vehicle',
+            icon = 'car',
+            onSelect = function()
+                local _, vehicle = Actions.NearestVehicle(7.0)
+                if not vehicle then return Bridge.Notify('No vehicle close enough.', 'error') end
+                TaskEnterVehicle(ped, vehicle, 10000, 2, 1.0, 1, 0)
+                SetTimeout(4000, function()
+                    if DoesEntityExist(ped) and not IsPedInAnyVehicle(ped, false) then
+                        TaskEnterVehicle(ped, vehicle, 10000, 1, 1.0, 1, 0)
+                    end
+                end)
+            end
+        }
+        options[#options + 1] = {
+            title = 'Release them',
+            icon = 'close',
+            onSelect = function()
+                SetEnableHandcuffs(ped, false)
+                ClearPedTasks(ped)
+                SetBlockingOfNonTemporaryEvents(ped, false)
+                TaskWanderStandard(ped, 10.0, 10)
+                npcState[ped] = nil
+                Bridge.Notify('Subject released.', 'inform')
+            end
+        }
+    end
+
+    DAG.Menu.Register({
+        id = Federal.Menus.Id('interview'),
+        title = 'Subject contact',
+        subtitle = result.name,
+        options = options
+    })
+    DAG.Menu.Open(Federal.Menus.Id('interview'))
+end
+
+function Actions.InterviewPed(ped, pressing)
+    if not ped or not DoesEntityExist(ped) then
+        return Bridge.Notify('They are gone.', 'error')
+    end
+    -- A ped mid-fight or mid-flight is not giving a statement.
+    if IsPedInCombat(ped, PlayerPedId()) or IsPedFleeing(ped) then
+        return Bridge.Notify('They are in no state to be interviewed - deal with them first.', 'error')
+    end
+
+    -- Hold the witness in place and face the officer: an interview, not a
+    -- conversation shouted at a fleeing back. A subject already down, in
+    -- cuffs or with their hands up keeps their pose.
+    local held = npcState[ped]
+    if not (held and (held.subdued or held.cuffed or held.hands)) then
+        ClearPedTasksImmediately(ped)
+        TaskTurnPedToFaceEntity(ped, PlayerPedId(), 1500)
+        TaskStandStill(ped, 30000)
+        SetBlockingOfNonTemporaryEvents(ped, true)
+    end
+
+    if not Federal.Progress.Run({
+        label = pressing and 'Pressing the witness' or 'Interviewing the witness',
+        duration = timing('interview') or 4000,
+        animation = 'search'
+    }) then
+        SetBlockingOfNonTemporaryEvents(ped, false)
+        return
+    end
+
+    Bridge.TriggerCallback(Federal.Net('investigate:interview'), function(result, err)
+        if not result then
+            SetBlockingOfNonTemporaryEvents(ped, false)
+            return Bridge.Notify(err or 'They will not talk to you.', 'error')
+        end
+        showInterview(ped, result)
+    end, npcKey(ped))
+end
+
+function Actions.Interview()
+    local ped = Actions.NearestNPC(3.0)
+    if not ped then
+        return Bridge.Notify('Nobody is close enough to interview.', 'error')
+    end
+    Actions.InterviewPed(ped, false)
+end
+
+function Actions.ReviewCCTV()
+    if not Federal.Progress.Run({
+        label = 'Pulling the CCTV',
+        duration = timing('cctv') or 8000,
+        animation = 'search'
+    }) then return end
+
+    Bridge.TriggerCallback(Federal.Net('investigate:cctv'), function(result, err)
+        if not result then return Bridge.Notify(err or 'No footage.', 'error') end
+        Bridge.Notify(('%s %s%s'):format(
+            result.summary,
+            result.evidenceNumber and ('Filed as %s.'):format(result.evidenceNumber) or '',
+            result.lead and (' ' .. result.lead) or ''), 'success', 12000)
+    end)
+end
+
+-- Bagging evidence in the field: anywhere, not just a callout marker. Pick
+-- what kind of item it is, describe it, kneel and seal it. The server spends
+-- one evidence bag and hands back the sealed bag as an inventory item; it
+-- stays in the officer's custody until checked into an evidence locker.
+function Actions.BagEvidence()
+    local options = {}
+    for _, key in ipairs(Const.EvidenceKindOrder) do
+        local kindKey = key
+        local kind = Const.EvidenceKinds[key]
+        options[#options + 1] = {
+            title = kind.label,
+            icon = 'box',
+            onSelect = function()
+                DAG.Menu.Input('Bag evidence', {
+                    { name = 'label', label = 'What is it?', required = true },
+                    { name = 'description', label = 'Condition / where found (optional)' },
+                    { name = 'incident', label = 'Attach to incident id (optional)' }
+                }, function(values)
+                    if not values then return end
+
+                    if not Federal.Progress.Run({
+                        label = 'Bagging and sealing evidence',
+                        duration = timing('collectEvidence'),
+                        animation = 'collect'
+                    }) then return end
+
+                    local coords = GetEntityCoords(PlayerPedId())
+                    Bridge.TriggerCallback(Federal.Net('cad:bag'), function(record, err)
+                        Bridge.Notify(record
+                            and ('Sealed as %s. Check it into an evidence locker.'):format(record.number)
+                            or (err or 'Refused.'), record and 'success' or 'error', 8000)
+                    end, {
+                        kind = kindKey,
+                        label = values.label or values[1],
+                        description = values.description or values[2],
+                        incidentId = values.incident or values[3],
+                        location = { x = coords.x, y = coords.y, z = coords.z }
+                    })
+                end)
+            end
+        }
+    end
+
+    DAG.Menu.Register({
+        id = Federal.Menus.Id('bagEvidence'),
+        title = 'Bag evidence',
+        subtitle = 'What are you sealing?',
+        options = options
+    })
+    DAG.Menu.Open(Federal.Menus.Id('bagEvidence'))
+end
+
 function Actions.Arrest()
     local target = requireTarget()
     if not target then return end
@@ -417,8 +818,11 @@ function Actions.Options()
     add('actions.search', { title = 'Search suspect', icon = 'box', onSelect = Actions.Search })
     add('actions.search', { title = 'Search vehicle', icon = 'car', onSelect = Actions.SearchVehicle })
     add('actions.search', { title = 'Identify subject', icon = 'info', onSelect = Actions.Identify })
+    add('actions.search', { title = 'Interview witness (NPC)', icon = 'user', onSelect = Actions.Interview })
+    add('actions.search', { title = 'Review scene CCTV', icon = 'info', onSelect = Actions.ReviewCCTV })
     add('actions.evidence', { title = 'Fingerprint subject', icon = 'user', onSelect = Actions.Fingerprint })
     add('actions.evidence', { title = 'Take DNA swab', icon = 'box', onSelect = Actions.Swab })
+    add('actions.evidence', { title = 'Bag evidence', icon = 'box', onSelect = Actions.BagEvidence })
     add('actions.arrest', { title = 'Book arrest', icon = 'lock', badgeTone = 'danger', onSelect = Actions.Arrest })
     add('actions.arrest', { title = 'Issue fine', icon = 'cash', onSelect = Actions.Fine })
     add('actions.arrest', { title = 'Release subject', icon = 'check', onSelect = Actions.Release })

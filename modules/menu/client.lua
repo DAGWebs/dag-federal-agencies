@@ -137,6 +137,13 @@ end
 function Menu.Input(title, fields, callback)
     assert(type(fields) == 'table' and type(callback) == 'function', 'Invalid menu input')
 
+    -- When the bundled NUI menu is the provider, its dialog matches it. This
+    -- also means Config.Menu = 'nui' keeps every screen in one visual style
+    -- instead of dropping to qb-input for text entry.
+    if Menu.Provider() == 'nui' and Menu.OpenInput then
+        return Menu.OpenInput(title, fields, callback)
+    end
+
     if GetResourceState('ox_lib') == 'started' then
         return callback(exports.ox_lib:inputDialog(title, fields))
     end

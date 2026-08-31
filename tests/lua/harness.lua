@@ -201,6 +201,20 @@ end
 
 function _G.GetPlayerPed(playerSource) return harness.peds[playerSource] or 0 end
 
+-- Keybinds and movement clipsets, used by the holster.
+function _G.RegisterKeyMapping(command, label, device, key)
+    harness.keyMappings = harness.keyMappings or {}
+    harness.keyMappings[command] = { label = label, device = device, key = key }
+end
+function _G.RequestAnimSet() end
+function _G.HasAnimSetLoaded() return true end
+function _G.SetNightvision(enabled) harness.nightvision = enabled end
+function _G.SetPedMovementClipset() end
+function _G.ResetPedMovementClipset() end
+function _G.GetSelectedPedWeapon() return GetHashKey and GetHashKey('WEAPON_UNARMED') or 0 end
+function _G.DisablePlayerFiring() end
+function _G.StopAnimTask() end
+
 function _G.GetPlayers()
     local list = {}
     for _, playerSource in ipairs(harness.players) do list[#list + 1] = tostring(playerSource) end
@@ -493,7 +507,7 @@ function harness.loadFederalClient(opts)
     end
     for _, file in ipairs(opts.federal or {
         'state', 'progress', 'uniforms', 'actions', 'suspects', 'cad', 'armory',
-        'dispatch', 'equipment', 'units', 'reports', 'leads', 'callouts', 'court', 'jail', 'personnel', 'editor', 'mdt', 'hud', 'menus', 'zones', 'bootstrap'
+        'dispatch', 'equipment', 'units', 'reports', 'leads', 'callouts', 'court', 'jail', 'personnel', 'editor', 'mdt', 'hud', 'studio', 'configpanel', 'doors', 'applications', 'holster', 'nightvision', 'menus', 'zones', 'bootstrap'
     }) do
         harness.load('federal/client/' .. file .. '.lua')
     end

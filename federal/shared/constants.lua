@@ -48,14 +48,16 @@ Const.Permissions = {
     ['actions.detain']  = 'Cuff, escort and detain suspects',
     ['actions.search']  = 'Search suspects and vehicles',
     ['actions.arrest']  = 'Book arrests and issue fines',
-    ['actions.evidence'] = 'Collect evidence at a scene'
+    ['actions.evidence'] = 'Collect evidence at a scene',
+    ['callsign.self']   = 'Choose their own callsign suffix'
 }
 
 Const.PermissionOrder = {
     'cad.view', 'cad.write', 'cad.warrant', 'cad.expunge',
     'armory.use', 'armory.manage', 'uniform.manage', 'roster.manage',
     'editor.manage', 'callout.manage',
-    'actions.detain', 'actions.search', 'actions.arrest', 'actions.evidence'
+    'actions.detain', 'actions.search', 'actions.arrest', 'actions.evidence',
+    'callsign.self'
 }
 
 -- Unit status shown on the CAD roster.
@@ -101,7 +103,7 @@ Const.ObjectiveKinds = {
 }
 
 -- Numbering series. Each agency keeps its own counter per series.
-Const.Series = { incident = 'INC', warrant = 'WNT', bolo = 'BLO', evidence = 'EVD', callout = 'CAD', court = 'CR', lead = 'LED' }
+Const.Series = { incident = 'INC', warrant = 'WNT', bolo = 'BLO', evidence = 'EVD', callout = 'CAD', court = 'CR', lead = 'LED', casefile = 'CF' }
 
 -- Investigation leads -------------------------------------------------------
 

@@ -31,14 +31,17 @@ test('Config.ChatSelectCommand overrides the derived name', function()
     assertTrue(harness.commands.pick ~= nil)
 end)
 
--- The bundled NUI menu is the fallback now; chat is opt-in only.
+-- The bundled NUI menu is the fallback now; chat is opt-in only. The shipped
+-- config pins Config.Menu = 'nui', so these auto tests set 'auto' explicitly.
 test('auto falls back to the bundled NUI menu, not chat', function()
     loadMenu()
+    Config.Menu = 'auto'
     assertEq(DAG.Menu.Provider(), 'nui')
 end)
 
 test('auto still respects ox_lib and qb-menu when installed', function()
     loadMenu()
+    Config.Menu = 'auto'
     harness.resourceStates['qb-menu'] = 'started'
     assertEq(DAG.Menu.Provider(), 'qb')
 
@@ -489,8 +492,42 @@ end)
 
 -- Input -------------------------------------------------------------------
 
+test('Input uses the bundled NUI dialog when the NUI provider is active', function()
+    loadMenu()
+    local result
+    DAG.Menu.Input('Callsign', { { name = 'callsign', label = 'Callsign', required = true } }, function(value)
+        result = value
+    end)
+
+    local message = harness.lastNuiMessage()
+    assertEq(message.action, 'input:open')
+    assertEq(message.input.title, 'Callsign')
+    assertEq(message.input.fields[1].name, 'callsign')
+    assertTrue(message.input.fields[1].required)
+    assertEq(harness.nuiFocus.focus, true)
+
+    -- The dialog posts its values back through the inputResult callback.
+    harness.nuiCallbacks.inputResult({ values = { callsign = 'ADAM-1' } }, function() end)
+    assertEq(result.callsign, 'ADAM-1')
+    assertEq(harness.nuiFocus.focus, false)
+end)
+
+test('a cancelled NUI dialog reports nil', function()
+    loadMenu()
+    local called, result = false, 'sentinel'
+    DAG.Menu.Input('Callsign', { { name = 'callsign' } }, function(value)
+        called, result = true, value
+    end)
+
+    harness.nuiCallbacks.inputResult({ cancelled = true }, function() end)
+    assertTrue(called)
+    assertNil(result)
+end)
+
 test('Input reports when no provider is available', function()
     loadMenu()
+    -- Force a non-NUI provider with no input backend at all.
+    Config.Menu = 'chat'
     local values, reason
     DAG.Menu.Input('Label', { { name = 'a' } }, function(value, err) values, reason = value, err end)
 
@@ -500,6 +537,7 @@ end)
 
 test('Input maps fields onto the qb-input shape', function()
     loadMenu()
+    Config.Menu = 'chat'
     local received
     harness.resourceStates['qb-input'] = 'started'
     harness.exportTargets['qb-input'] = {

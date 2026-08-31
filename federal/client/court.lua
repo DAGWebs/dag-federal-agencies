@@ -136,8 +136,7 @@ end
 -- Menus ------------------------------------------------------------------------------------
 
 local function stamp(seconds)
-    if type(seconds) ~= 'number' then return '' end
-    return os.date('%d %b %H:%M', seconds)
+    return Federal.Util.Stamp(seconds)
 end
 
 local STAGE_LABEL = {

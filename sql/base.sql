@@ -1,0 +1,19 @@
+-- DAG Federal Agencies — base SQL.
+--
+-- The resource itself requires NO database tables. Everything it owns —
+-- editor overrides, CAD incidents, warrants, BOLOs, citizen records,
+-- evidence, court cases and jail time — is persisted to `data/storage.json`
+-- via the bundled JSON storage module (see Config.Storage in config.lua).
+--
+-- The SQL in this folder only seeds YOUR FRAMEWORK with the jobs (and, for
+-- ESX, the items) the agencies map to:
+--
+--   esx.sql      ESX Legacy: jobs + job_grades + legacy items table
+--   qbcore.sql   QBCore: optional qb-banking society accounts only
+--                (jobs/items are Lua — see install/qbcore/)
+--   ox_core.sql  Ox Core: the four groups
+--
+-- Qbox needs no SQL (jobs are Lua in qbx_core, items in ox_inventory).
+-- vRP forks vary too much for generic SQL; see install/README.md.
+--
+-- Nothing to run in this file.

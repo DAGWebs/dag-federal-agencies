@@ -66,17 +66,66 @@ function Uniforms.Variant()
 end
 
 -- A uniform saved for one body type applied to the other produces nonsense,
--- so the locker only offers the ones that fit.
-function Uniforms.Wearable(uniform, grade)
+-- so the locker only offers the ones that fit. Division-tied uniforms only
+-- offer to members of that division; the server re-checks all of it.
+function Uniforms.Wearable(uniform, grade, divisionId)
     if type(uniform) ~= 'table' then return false end
     if (grade or 0) < (uniform.minGrade or 0) then return false end
+    if uniform.division and uniform.division ~= divisionId then return false end
     return uniform.variant == 'any' or uniform.variant == Uniforms.Variant()
 end
 
+-- What the player wore before their FIRST uniform of the session, so
+-- "civilian clothes" can put it back even with no skin resource running.
+local civilianOutfit = nil
+
 RegisterNetEvent(Federal.Net('wearUniform'), function(uniform)
+    if civilianOutfit == nil then civilianOutfit = Uniforms.Capture() end
     if Uniforms.Apply(uniform) then
         Bridge.Notify(('Changed into %s.'):format(uniform.label or 'uniform'), 'success')
     end
+end)
+
+-- Changing back: ask the server's skin resource for the saved appearance
+-- (the authoritative copy), falling back to the outfit captured before the
+-- first uniform went on. The event stays public so a custom skin stack can
+-- add its own handler.
+AddEventHandler(Federal.Net('restoreAppearance'), function()
+    if GetResourceState('qb-clothing') == 'started' then
+        TriggerServerEvent('qb-clothes:loadPlayerSkin')
+        civilianOutfit = nil
+        Bridge.Notify('Changed back into your own clothes.', 'success')
+        return
+    end
+
+    if GetResourceState('illenium-appearance') == 'started' then
+        TriggerEvent('illenium-appearance:client:reloadSkin')
+        civilianOutfit = nil
+        Bridge.Notify('Changed back into your own clothes.', 'success')
+        return
+    end
+
+    if civilianOutfit then
+        Uniforms.Apply(civilianOutfit)
+        civilianOutfit = nil
+        Bridge.Notify('Changed back into your own clothes.', 'success')
+        return
+    end
+
+    Bridge.Notify('No saved appearance to change back into - use your clothing menu.', 'error')
+end)
+
+-- /feduniform round trip: the server command asks this client to read the
+-- outfit it is wearing; authorization stays on the server.
+RegisterNetEvent(Federal.Net('captureOutfit'), function(agencyId, label, minGrade)
+    local captured = Uniforms.Capture()
+    TriggerServerEvent(Federal.Net('uniform:adminSave'), agencyId, {
+        label = label,
+        minGrade = tonumber(minGrade) or 0,
+        variant = Uniforms.Variant(),
+        components = captured.components,
+        props = captured.props
+    })
 end)
 
 return Uniforms

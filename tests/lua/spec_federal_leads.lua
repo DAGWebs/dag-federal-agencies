@@ -99,7 +99,7 @@ test('evidence collected outside a callout produces no lead', function()
     atLab(1)
     local analysed = DAG.Federal.CAD.AnalyseEvidence(1, item.id)
 
-    assertEq(analysed.result, 'Match: Sam Cole', 'the analysis still works')
+    assertEq(analysed.result, 'AFIS hit: Sam Cole', 'the analysis still works')
     assertNil(analysed.lead, 'it just has no investigation to feed')
 end)
 

@@ -17,11 +17,13 @@ Config.ReportCapabilities = true
 -- Note: on Qbox and Ox Core the framework-native inventory IS ox_inventory,
 -- so 'framework' behaves identically to 'auto' on those cores.
 Config.Inventory = 'auto' -- auto, ox, framework
-Config.Notify = 'auto' -- auto, ox, framework, chat
+-- 'nui' renders this resource's notifications as bottom-right toasts in the
+-- bundled UI, out from under HUDs that cover the framework's notify area.
+Config.Notify = 'nui' -- auto, nui, ox, framework, chat
 -- auto: ox_lib, then qb-menu, then the bundled NUI menu in ui/.
 -- Set 'nui' to always use the bundled menu even when ox_lib is installed.
 -- 'chat' is a text-only fallback for servers that cannot run NUI.
-Config.Menu = 'auto' -- auto, nui, ox, qb, chat
+Config.Menu = 'nui' -- auto, nui, ox, qb, chat
 
 -- Applied to the bundled NUI menu only.
 Config.MenuTheme = {
@@ -48,7 +50,18 @@ Config.InteractionDistance = 2.0
 
 Config.Storage = {
     file = 'data/storage.json',
-    saveInterval = 5000 -- clamped to a 1000ms floor
+    saveInterval = 5000, -- clamped to a 1000ms floor
+
+    -- Where records live. 'auto' uses MySQL (through oxmysql) whenever it is
+    -- running and falls back to the JSON file otherwise; the JSON file keeps
+    -- being written as a live backup either way. On the first MySQL start an
+    -- existing storage.json is imported automatically, so switching drivers
+    -- never loses data. See sql/storage.sql.
+    driver = 'auto', -- auto, mysql, json
+
+    -- Database table name. nil derives it from the resource name
+    -- (dag_federal_agencies_storage).
+    table = nil
 }
 
 -- Ox Core keeps cash as an ox_inventory item; change this if your server
@@ -123,6 +136,67 @@ Config.Federal = {
     -- Fines written from the CAD. Bounds are enforced on the server.
     fines = { account = 'bank', minimum = 50, maximum = 50000 },
 
+    -- The radio traffic key: opens the quick call menu (show me en route /
+    -- on scene / code 6 / back in service / panic). Rebindable per player
+    -- under FiveM key bindings; LMENU is left Alt.
+    radio = { defaultKey = 'LMENU' },
+
+    -- Vehicle keys for motor pool spawns. Detection is automatic for
+    -- qb-vehiclekeys, qbx_vehiclekeys, qs-vehiclekeys, wasabi_carlock,
+    -- MrNewbVehicleKeys and mk_vehiclekeys. For anything else, wire your key
+    -- script here: `clientEvent` is fired with (plate, vehicle), and/or
+    -- `export = { resource = 'my_keys', method = 'GiveKeys', pass = 'plate' }`
+    -- (pass = 'plate' or 'vehicle') calls a client export.
+    vehicleKeys = {},
+
+    -- In-game CAD photography. With the screenshot-basic resource running
+    -- and an upload endpoint configured here (fivemanage, a Discord webhook,
+    -- any host that accepts multipart uploads and answers with a URL),
+    -- officers get a "take photo with the camera" option wherever the CAD
+    -- accepts pictures. Leave url = '' to keep photos link-only.
+    mediaUpload = { url = '', field = 'files[]' },
+
+    -- The charge catalog the CAD's pickers search: officers choose from this
+    -- list instead of free-typing charge names. Extend or replace freely.
+    charges = {
+        'Assault on a Federal Officer',
+        'Resisting Arrest',
+        'Evading a Federal Officer',
+        'Obstruction of Justice',
+        'Conspiracy',
+        'Racketeering (RICO)',
+        'Wire Fraud',
+        'Bank Fraud',
+        'Tax Evasion',
+        'Money Laundering',
+        'Counterfeiting',
+        'Identity Theft',
+        'Bribery of a Public Official',
+        'Extortion',
+        'Witness Tampering',
+        'Perjury',
+        'Espionage',
+        'Terroristic Threats',
+        'Possession of a Controlled Substance',
+        'Possession with Intent to Distribute',
+        'Drug Trafficking',
+        'Unlawful Possession of a Firearm',
+        'Firearms Trafficking',
+        'Possession of an Illegal Weapon',
+        'Kidnapping',
+        'Human Trafficking',
+        'Grand Theft Auto',
+        'Armed Robbery',
+        'Burglary of a Federal Facility',
+        'Destruction of Government Property',
+        'Cybercrime / Unauthorized Computer Access',
+        'Smuggling',
+        'Poaching on Federal Land',
+        'Arson',
+        'Homicide',
+        'Attempted Homicide'
+    },
+
     -- On-screen duty HUD: callsign, status, rank and the current callout
     -- objectives. Set enabled = false to run without it.
     hud = {
@@ -132,6 +206,67 @@ Config.Federal = {
         offDuty = false,
         -- How many callout objectives to show around the current one.
         objectives = 4
+    },
+
+    -- The holster. Members press the holster key (default Z, rebindable in
+    -- FiveM's keybind settings) to rest a hand on their holster - allowed
+    -- only when one of the listed sidearms is actually in their inventory.
+    -- Equipping one of them plays a draw-from-the-holster animation, and
+    -- putting it away plays the re-holster.
+    holster = {
+        enabled = true,
+        defaultKey = 'Z',
+        weapons = {
+            'weapon_pistol', 'weapon_pistol_mk2', 'weapon_combatpistol',
+            'weapon_heavypistol', 'weapon_snspistol', 'weapon_stungun'
+        }
+    },
+
+    -- Using this inventory item opens the MDT anywhere (members with
+    -- cad.view only). Stock it in the armory so agents can draw one.
+    tabletItem = 'fed_tablet',
+
+    -- Where the armory storefront finds item images: your inventory
+    -- resource's NUI image folder, so the shelves show the same pictures as
+    -- the inventory itself. Set to '' to fall back to icon glyphs.
+    itemImages = 'nui://jpr-inventory/html/images/',
+
+    -- Ammunition issued with every weapon drawn from the armory. `count` is
+    -- how many ammo items come with the gun; `map` overrides the automatic
+    -- weapon-name matching per item.
+    armoryAmmo = {
+        enabled = true,
+        count = 2,
+        map = {}
+    },
+
+    -- Night vision goggles. Members wearing an NVG helmet press the toggle
+    -- key (default K, rebindable in FiveM keybinds) to flip the lenses down
+    -- and turn night vision on; pressing again flips them up and off.
+    --
+    -- Each pair maps the helmet prop drawable with the lenses UP to the one
+    -- with the lenses DOWN, per freemode body. Only a pair matching the
+    -- helmet actually worn does anything, so extra candidates are harmless -
+    -- if your helmet toggles the wrong way, swap its up/down numbers here.
+    nightVision = {
+        enabled = true,
+        defaultKey = 'K',
+        helmets = {
+            male = {
+                { up = 117, down = 116 },
+                { up = 125, down = 124 },
+                { up = 127, down = 126 },
+                { up = 148, down = 147 },
+                { up = 150, down = 149 }
+            },
+            female = {
+                { up = 116, down = 115 },
+                { up = 124, down = 123 },
+                { up = 126, down = 125 },
+                { up = 147, down = 146 },
+                { up = 149, down = 148 }
+            }
+        }
     },
 
     -- How long each timed action takes, in ms. Nothing in this resource is
@@ -150,8 +285,17 @@ Config.Federal = {
         writeReport = 4000
     },
 
-    -- Evidence lab. `analysisTime` is how long the lab bench takes, in ms.
-    evidence = { analysisTime = 12000 },
+    -- Evidence lab and field custody. `analysisTime` is how long the lab
+    -- bench takes, in ms. Bagging evidence in the field consumes a `bagItem`
+    -- and puts a sealed `baggedItem` in the officer's inventory until it is
+    -- checked into an evidence locker; a `fieldTestItem` runs a presumptive
+    -- roadside test on substances.
+    evidence = {
+        analysisTime = 12000,
+        bagItem = 'evidence_bag',
+        baggedItem = 'bagged_evidence',
+        fieldTestItem = 'field_test_kit'
+    },
 
     -- Reports from the public. Callouts on a timer are the same seven cases
     -- forever; a player who calls something in is the only source of work

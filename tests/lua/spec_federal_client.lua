@@ -685,9 +685,20 @@ test('a citizen record shows arrests, fines and notes', function()
 
     local labels = {}
     for _, section in ipairs(rows[1].sections) do labels[section.label] = section end
-    assertEq(labels['Arrests'].notes[1].text, 'Wire fraud')
-    assertTrue(labels['Fines'] ~= nil and labels['Notes'] ~= nil)
+    -- Arrests are linked fields now: each one opens its arrest report.
+    assertEq(labels['Criminal record - arrests'].fields[1].value, 'Wire fraud')
+    assertEq(labels['Criminal record - arrests'].fields[1].link.tab, 'custody')
+    assertTrue(labels['Civil record - fines'] ~= nil and labels['Agency notes'] ~= nil)
     assertEq(rows[1].pill, '1 arrest(s)')
+    assertEq(rows[1].document.heading, 'CRIMINAL RECORD')
+
+    -- A record with no arrests is a civilian file, not a criminal one.
+    local clean = DAG.Federal.MDT.Build('records', { {
+        identifier = 'license:amy', name = 'Amy Reyes', printed = false,
+        arrests = {}, fines = {}, notes = {}
+    } })
+    assertEq(clean[1].document.heading, 'CIVILIAN RECORD')
+    assertEq(clean[1].pill, 'Civilian')
 end)
 
 test('an open lead offers to be followed and a worked one does not', function()
@@ -730,7 +741,8 @@ test('a unit row carries the status tone the map uses', function()
         station = 'fib-tower', status = 'panic'
     } })
 
-    assertEq(rows[1].pill, 'Panic')
+    -- Statuses read uppercased on the roster, the way a CAD prints them.
+    assertEq(rows[1].pill, 'PANIC')
     assertEq(rows[1].tone, 'danger')
 end)
 

@@ -93,12 +93,23 @@ function Personnel.Roster(source)
             local job = Bridge.GetJob(playerSource)
             if job and Util.Contains(membership.agency.jobs, job.name) then
                 local rank = Core.Rank(membership.agency, job.grade)
+                local identifier = Bridge.GetIdentifier(playerSource)
+                local division = Core.DivisionOf(identifier, membership.agency)
+                local divisionRank = division and Core.DivisionRankOf(identifier, division) or nil
+                local memberMembership = Core.Membership(playerSource)
                 roster[#roster + 1] = {
                     source = playerSource,
+                    callsign = memberMembership and Core.CallsignFor(memberMembership) or nil,
+                    callsignPrefix = memberMembership and Core.CallsignPrefix(memberMembership) or nil,
+                    certs = Personnel.CertsFor(identifier),
                     name = Bridge.GetName(playerSource),
-                    identifier = Bridge.GetIdentifier(playerSource),
+                    identifier = identifier,
                     grade = job.grade,
                     rank = rank and rank.label or 'Unranked',
+                    division = division and division.label or nil,
+                    divisionId = division and division.id or nil,
+                    divisionRank = divisionRank and divisionRank.label or nil,
+                    divisionRankGrade = divisionRank and divisionRank.grade or 0,
                     onDuty = Core.Unit(playerSource) ~= nil
                 }
             end
@@ -235,6 +246,60 @@ function Personnel.Fire(source, target)
     return { target = target, name = Bridge.GetName(target) }
 end
 
+-- Assigns a member to one of the agency's divisions (sub-departments), or
+-- clears the assignment when divisionId is nil/''. The division must exist in
+-- the agency catalog, and the member must not outrank the boss doing it.
+function Personnel.SetDivision(source, target, divisionId, rankGrade)
+    local membership = requireBoss(source)
+    if not membership then return fail('not authorized') end
+
+    target = tonumber(target)
+    if not target then return fail('no valid subject') end
+
+    local job = Bridge.GetJob(target)
+    if not job or not Util.Contains(membership.agency.jobs, job.name) then
+        return fail('they do not work here')
+    end
+    if target ~= source and job.grade >= membership.grade and not Core.IsAdmin(source) then
+        return fail('they outrank you')
+    end
+
+    local identifier = Bridge.GetIdentifier(target)
+    if not identifier then return fail('their identifier could not be read') end
+
+    if divisionId == nil or divisionId == '' then
+        Core.AssignDivision(identifier, membership.agency.id, nil)
+        record(membership, 'division-cleared', target, nil)
+        Core.Sync(target)
+        return { target = target, name = Bridge.GetName(target), division = 'no division' }
+    end
+
+    local division = Federal.Schema.FindById(membership.agency.divisions or {}, divisionId)
+    if not division then return fail('that division does not exist - create it first') end
+    if job.grade < (division.minGrade or 0) then
+        return fail(('%s requires grade %d+'):format(division.label, division.minGrade))
+    end
+
+    -- Keep the division rank when only re-assigning; a given rankGrade sets
+    -- their place on the division's own ladder (promotion/demotion).
+    local grade = tonumber(rankGrade)
+    if grade == nil then
+        local currentDivision, currentGrade = Core.DivisionAssignment(identifier)
+        grade = currentDivision == division.id and currentGrade or 0
+    end
+
+    local ok, message = Core.AssignDivision(identifier, membership.agency.id, division.id, grade)
+    if not ok then return fail(message) end
+
+    local divisionRank = Core.DivisionRankOf(identifier, division)
+    local title = divisionRank and ('%s (%s)'):format(division.label, divisionRank.label) or division.label
+
+    record(membership, 'division', target, title)
+    Bridge.Notify(target, ('You have been assigned to %s.'):format(title), 'inform')
+    Core.Sync(target)
+    return { target = target, name = Bridge.GetName(target), division = title }
+end
+
 function Personnel.History(source, limit)
     local membership = Core.Membership(source)
     if not membership or not Core.Can(source, 'roster.manage') then return {} end
@@ -249,6 +314,157 @@ function Personnel.History(source, limit)
     for index = 1, math.min(#entries, tonumber(limit) or 25) do capped[index] = entries[index] end
     return capped
 end
+
+-- Certifications ---------------------------------------------------------------
+--
+-- Awards from the agency's own catalog (defined in /fedconfig): Field
+-- Training, SWAT, Firearms... Toggled per member by roster managers; each
+-- award remembers who signed it and when. Personnel files read this.
+
+local memberCerts = DAG.Repository.Create('federal_member_certs')
+
+function Personnel.CertsFor(identifier)
+    if type(identifier) ~= 'string' then return {} end
+    local entry = memberCerts.get(identifier)
+    return entry and Util.Copy(entry.list or {}) or {}
+end
+
+RegisterNetEvent(Federal.Net('personnel:certToggle'), function(targetSource, certId)
+    local playerSource = source
+    local membership = Core.Require(playerSource, 'roster.manage')
+    if not membership then return end
+
+    local targetId = Bridge.GetIdentifier(tonumber(targetSource) or 0)
+    if not targetId then return Bridge.Notify(playerSource, 'They are not online.', 'error') end
+
+    local cert = Federal.Schema.FindById(membership.agency.certifications or {}, tostring(certId))
+    if not cert then return Bridge.Notify(playerSource, 'No such certification.', 'error') end
+
+    local entry = memberCerts.get(targetId) or { id = targetId, list = {} }
+    for index, held in ipairs(entry.list) do
+        if held.id == cert.id then
+            table.remove(entry.list, index)
+            memberCerts.save(targetId, entry)
+            return Bridge.Notify(playerSource, ('Revoked %s.'):format(cert.label), 'success')
+        end
+    end
+
+    if #entry.list >= 24 then return Bridge.Notify(playerSource, 'Their file already carries the maximum awards.', 'error') end
+
+    -- Prerequisites: every framework licence the certification demands must
+    -- already be on the member before anyone may sign the award.
+    if #(cert.licences or {}) > 0 and Bridge.PlayerLicences then
+        local held = Bridge.PlayerLicences(tonumber(targetSource)) or {}
+        for _, licence in ipairs(cert.licences) do
+            if held[licence] ~= true then
+                return Bridge.Notify(playerSource,
+                    ('%s requires the %s licence, which they do not hold.'):format(cert.label, licence), 'error')
+            end
+        end
+    end
+
+    entry.list[#entry.list + 1] = { id = cert.id, label = cert.label, by = membership.name, at = os.time() }
+    memberCerts.save(targetId, entry)
+    Bridge.Notify(playerSource, ('Awarded %s.'):format(cert.label), 'success')
+end)
+
+-- Chain of command -------------------------------------------------------------
+--
+-- Who reports to whom, and who partners with whom. Stored by identifier so
+-- it follows the character; the personnel menu writes it, the CAD's
+-- personnel files read it.
+
+local orgchart = DAG.Repository.Create('federal_orgchart')
+
+local function orgEntry(identifier, name)
+    local entry = orgchart.get(identifier) or { id = identifier }
+    if name then entry.name = name end
+    return entry
+end
+
+function Personnel.OrgFor(identifier)
+    if type(identifier) ~= 'string' then return nil end
+    local entry = orgchart.get(identifier) or {}
+
+    local reports = {}
+    for _, other in pairs(orgchart.all()) do
+        if other.supervisorId == identifier and #reports < 10 then
+            reports[#reports + 1] = other.name or other.id
+        end
+    end
+
+    if not entry.supervisorName and not entry.partnerName and #reports == 0 then return nil end
+    return {
+        supervisor = entry.supervisorName,
+        partner = entry.partnerName,
+        reports = reports
+    }
+end
+
+RegisterNetEvent(Federal.Net('personnel:supervisor'), function(targetSource, supervisorSource)
+    local playerSource = source
+    if not Core.Require(playerSource, 'roster.manage') then return end
+
+    local targetId = Bridge.GetIdentifier(tonumber(targetSource) or 0)
+    if not targetId then return Bridge.Notify(playerSource, 'They are not online.', 'error') end
+
+    local entry = orgEntry(targetId, Bridge.GetName(tonumber(targetSource)))
+    supervisorSource = tonumber(supervisorSource)
+    if supervisorSource and supervisorSource > 0 then
+        local supervisorId = Bridge.GetIdentifier(supervisorSource)
+        if not supervisorId then return Bridge.Notify(playerSource, 'That supervisor is not online.', 'error') end
+        if supervisorId == targetId then return Bridge.Notify(playerSource, 'Nobody reports to themselves.', 'error') end
+        entry.supervisorId = supervisorId
+        entry.supervisorName = Bridge.GetName(supervisorSource)
+    else
+        entry.supervisorId = nil
+        entry.supervisorName = nil
+    end
+
+    orgchart.save(targetId, entry)
+    Bridge.Notify(playerSource, 'Chain of command updated.', 'success')
+end)
+
+-- Partnering is mutual: setting it writes both files, clearing it clears both.
+RegisterNetEvent(Federal.Net('personnel:partner'), function(targetSource, partnerSource)
+    local playerSource = source
+    if not Core.Require(playerSource, 'roster.manage') then return end
+
+    local targetId = Bridge.GetIdentifier(tonumber(targetSource) or 0)
+    if not targetId then return Bridge.Notify(playerSource, 'They are not online.', 'error') end
+
+    local entry = orgEntry(targetId, Bridge.GetName(tonumber(targetSource)))
+
+    -- Untie the existing partnership first, whichever way it points.
+    if entry.partnerId then
+        local previous = orgchart.get(entry.partnerId)
+        if previous then
+            previous.partnerId = nil
+            previous.partnerName = nil
+            orgchart.save(previous.id, previous)
+        end
+    end
+
+    partnerSource = tonumber(partnerSource)
+    if partnerSource and partnerSource > 0 then
+        local partnerId = Bridge.GetIdentifier(partnerSource)
+        if not partnerId then return Bridge.Notify(playerSource, 'That partner is not online.', 'error') end
+        if partnerId == targetId then return Bridge.Notify(playerSource, 'Nobody partners with themselves.', 'error') end
+
+        entry.partnerId = partnerId
+        entry.partnerName = Bridge.GetName(partnerSource)
+        local other = orgEntry(partnerId, Bridge.GetName(partnerSource))
+        other.partnerId = targetId
+        other.partnerName = entry.name
+        orgchart.save(partnerId, other)
+    else
+        entry.partnerId = nil
+        entry.partnerName = nil
+    end
+
+    orgchart.save(targetId, entry)
+    Bridge.Notify(playerSource, 'Partnership updated.', 'success')
+end)
 
 -- Net wiring ------------------------------------------------------------------
 
@@ -282,5 +498,6 @@ end
 personnelEvent('hire', Personnel.Hire, function(result) return ('Hired %s.'):format(result.name) end)
 personnelEvent('grade', Personnel.SetGrade, function(result) return ('Set rank to %s.'):format(result.rank) end)
 personnelEvent('fire', Personnel.Fire, function(result) return ('Dismissed %s.'):format(result.name) end)
+personnelEvent('division', Personnel.SetDivision, function(result) return ('%s assigned to %s.'):format(result.name, result.division) end)
 
 return Personnel

@@ -53,8 +53,11 @@ test('a state bag update for another player is ignored', function()
     assertFalse(fired)
 end)
 
+-- The shipped config pins Config.Notify = 'nui'; these auto-behaviour tests
+-- set 'auto' explicitly.
 test('notifications prefer ox_lib when it is running', function()
     loadClient()
+    Config.Notify = 'auto'
     local sent
     harness.resourceStates['ox_lib'] = 'started'
     harness.exportTargets.ox_lib = { notify = function(_, payload) sent = payload end }
@@ -76,8 +79,20 @@ end)
 
 test('notifications fall back to chat when the adapter has none', function()
     loadClient()
+    Config.Notify = 'auto'
     DAG.Framework.Notify('Hello')
     assertEq(harness.localEvents[#harness.localEvents].event, 'chat:addMessage')
+end)
+
+test("Config.Notify = 'nui' renders the bundled bottom-right toast", function()
+    loadClient()
+    Config.Notify = 'nui'
+    DAG.Framework.Notify('Hello', 'success', 2500)
+    local message = harness.lastNuiMessage()
+    assertEq(message.action, 'notify')
+    assertEq(message.text, 'Hello')
+    assertEq(message.kind, 'success')
+    assertEq(message.duration, 2500)
 end)
 
 test('the callback transport sends a request and resolves the reply', function()

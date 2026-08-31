@@ -71,6 +71,9 @@ local function baseArmory()
         { id = 'handcuffs', item = 'handcuffs', label = 'Handcuffs', category = 'Restraints', minGrade = 0 },
         { id = 'armour', item = 'armour', label = 'Body armour', category = 'Protection', minGrade = 0 },
         { id = 'evidence-kit', item = 'evidence_kit', label = 'Evidence collection kit', category = 'Investigation', minGrade = 0 },
+        { id = 'evidence-bags', item = 'evidence_bag', label = 'Evidence bags', category = 'Investigation', minGrade = 0, count = 5 },
+        { id = 'test-kit', item = 'field_test_kit', label = 'Substance test kit', category = 'Investigation', minGrade = 0 },
+        { id = 'tablet', item = 'fed_tablet', label = 'MDT tablet', category = 'Comms', minGrade = 0 },
         { id = 'pistol', item = 'weapon_pistol', label = 'Service pistol', category = 'Sidearm', minGrade = 1 },
         { id = 'stungun', item = 'weapon_stungun', label = 'Taser', category = 'Less lethal', minGrade = 0 }
     }
@@ -223,8 +226,7 @@ Config.Federal.Agencies = {
             placeholderUniform('raid-vest', 'Raid vest', 2)
         },
         armory = withExtras(baseArmory(), {
-            { id = 'shotgun', item = 'weapon_pumpshotgun', label = 'Breaching shotgun', category = 'Long gun', minGrade = 2 },
-            { id = 'test-kit', item = 'field_test_kit', label = 'Substance test kit', category = 'Investigation', minGrade = 0 }
+            { id = 'shotgun', item = 'weapon_pumpshotgun', label = 'Breaching shotgun', category = 'Long gun', minGrade = 2 }
         })
     },
 

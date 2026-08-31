@@ -25,6 +25,24 @@ Federal.Court = Court
 
 local cases = DAG.Repository.Create('federal_court_cases')
 local courthouses = DAG.Repository.Create('federal_courthouses')
+
+-- Everything on the docket (past or present) for one defendant, for the
+-- CAD's person profile. Light rows only; the courtroom owns the full case.
+function Court.CasesFor(identifier)
+    if type(identifier) ~= 'string' or identifier == '' then return {} end
+    local list = {}
+    for _, case in pairs(cases.all()) do
+        if case.defendant and case.defendant.identifier == identifier then
+            list[#list + 1] = {
+                number = case.number,
+                stage = case.stage,
+                verdict = case.verdict,
+                charges = case.charges
+            }
+        end
+    end
+    return list
+end
 Court.cases, Court.courthouses = cases, courthouses
 
 local function fail(message)

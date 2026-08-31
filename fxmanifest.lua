@@ -46,7 +46,15 @@ client_scripts {
     'federal/client/personnel.lua',
     'federal/client/editor.lua',
     'federal/client/mdt.lua',
+    'federal/client/subpoena.lua',
     'federal/client/hud.lua',
+    'federal/client/studio.lua',
+    'federal/client/configpanel.lua',
+    'federal/client/doors.lua',
+    'federal/client/applications.lua',
+    'federal/client/holster.lua',
+    'federal/client/nightvision.lua',
+    'federal/client/radio.lua',
     'federal/client/menus.lua',
     'federal/client/zones.lua',
     'federal/client/bootstrap.lua',
@@ -58,7 +66,8 @@ ui_page 'ui/index.html'
 files {
     'ui/index.html',
     'ui/style.css',
-    'ui/app.js'
+    'ui/app.js',
+    'ui/map.jpg'
 }
 
 server_scripts {
@@ -77,13 +86,18 @@ server_scripts {
     'federal/server/armory.lua',
     'federal/server/actions.lua',
     'federal/server/editor.lua',
+    'federal/server/configpanel.lua',
+    'federal/server/doors.lua',
+    'federal/server/applications.lua',
     'federal/server/dispatch.lua',
     'federal/server/equipment.lua',
     'federal/server/reports.lua',
     'federal/server/leads.lua',
+    'federal/server/investigation.lua',
     'federal/server/callouts.lua',
     'federal/server/court.lua',
     'federal/server/jail.lua',
+    'federal/server/subpoena.lua',
     'federal/server/commands.lua',
     'server/main.lua'
 }

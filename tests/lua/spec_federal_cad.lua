@@ -202,7 +202,7 @@ test('evidence hides its subject until the lab analyses it', function()
     standAt(1, 'fib', 'evidence')
     local analysed = DAG.Federal.CAD.AnalyseEvidence(1, item.id)
     assertTrue(analysed.analysed)
-    assertEq(analysed.result, 'Match: Sam Cole')
+    assertEq(analysed.result, 'CODIS hit: Sam Cole')
     assertEq(analysed.match, 'license:sam')
     assertEq(#analysed.chain, 2, 'the chain of custody records the analysis')
 end)
@@ -213,7 +213,7 @@ test('an item is analysed once, and unanalysable kinds are refused', function()
     standAt(1, 'fib', 'evidence')
 
     local swab = DAG.Federal.CAD.CollectEvidence(1, { kind = 'dna', subject = 'license:ghost' })
-    assertEq(DAG.Federal.CAD.AnalyseEvidence(1, swab.id).result, 'No match on file')
+    assertEq(DAG.Federal.CAD.AnalyseEvidence(1, swab.id).result, 'CODIS search returned no candidates on file')
 
     local _, message = DAG.Federal.CAD.AnalyseEvidence(1, swab.id)
     assertEq(message, 'that item has already been analysed')
@@ -233,6 +233,74 @@ test('evidence attaches to a case and is listed against it', function()
     local attached = DAG.Federal.CAD.EvidenceFor(1, incident.id)
     assertEq(#attached, 1)
     assertEq(attached[1].number, item.number)
+end)
+
+-- Bagging in the field: spends a bag, hands back a sealed one, and the lab
+-- refuses the item until it is checked into the locker.
+test('bagged evidence stays in field custody until checked in', function()
+    loadCad()
+    officer(1, 'fib', 2, 'Dana Reyes')
+    DAG.Framework.AddItem(1, 'evidence_bag', 2)
+
+    local item = DAG.Federal.CAD.BagEvidence(1, {
+        kind = 'substance', label = 'White powder', location = { x = 10.0, y = 20.0, z = 30.0 }
+    })
+    assertEq(item.custody, 'field')
+    assertEq(DAG.Framework.GetItemCount(1, 'evidence_bag'), 1, 'one bag spent')
+    assertEq(DAG.Framework.GetItemCount(1, 'bagged_evidence'), 1, 'the sealed bag rides along')
+
+    standAt(1, 'fib', 'evidence')
+    local _, message = DAG.Federal.CAD.AnalyseEvidence(1, item.id)
+    assertEq(message, 'check that bag into the evidence locker first')
+
+    assertEq(#DAG.Federal.CAD.HeldEvidence(1), 1)
+
+    local checked = DAG.Federal.CAD.CheckInEvidence(1, item.id)
+    assertEq(checked.custody, 'locker')
+    assertEq(DAG.Framework.GetItemCount(1, 'bagged_evidence'), 0, 'the sealed bag is handed over')
+    assertEq(#checked.chain, 2, 'check-in joins the chain of custody')
+
+    local analysed = DAG.Federal.CAD.AnalyseEvidence(1, item.id)
+    assertEq(analysed.result, 'Laboratory confirmation: controlled substance, composition on file')
+end)
+
+test('bagging needs a bag, and check-in needs the locker and the sealing officer', function()
+    loadCad()
+    officer(1, 'fib', 2)
+    local _, message = DAG.Federal.CAD.BagEvidence(1, { kind = 'casing' })
+    assertEq(message, 'you need an evidence_bag to bag that')
+
+    DAG.Framework.AddItem(1, 'evidence_bag', 1)
+    local item = DAG.Federal.CAD.BagEvidence(1, { kind = 'casing', label = '9mm casing' })
+
+    -- At the duty desk, not the locker.
+    local _, whereMessage = DAG.Federal.CAD.CheckInEvidence(1, item.id)
+    assertEq(whereMessage, 'not at an evidence locker')
+
+    -- A different officer cannot hand in a bag they never sealed.
+    officer(2, 'fib', 2)
+    standAt(2, 'fib', 'evidence')
+    local _, whoMessage = DAG.Federal.CAD.CheckInEvidence(2, item.id)
+    assertEq(whoMessage, 'a different officer sealed that bag')
+end)
+
+test('a reagent kit field-tests a substance once, and only a substance', function()
+    loadCad()
+    officer(1, 'fib', 2)
+    DAG.Framework.AddItem(1, 'evidence_bag', 2)
+    DAG.Framework.AddItem(1, 'field_test_kit', 2)
+
+    local casing = DAG.Federal.CAD.BagEvidence(1, { kind = 'casing' })
+    local _, kindMessage = DAG.Federal.CAD.FieldTestEvidence(1, casing.id)
+    assertEq(kindMessage, 'only a substance takes a reagent test')
+
+    local powder = DAG.Federal.CAD.BagEvidence(1, { kind = 'substance' })
+    local tested = DAG.Federal.CAD.FieldTestEvidence(1, powder.id)
+    assertEq(tested.fieldTest, 'Presumptive positive - controlled substance indicated')
+    assertEq(DAG.Framework.GetItemCount(1, 'field_test_kit'), 1, 'one kit spent')
+
+    local _, againMessage = DAG.Federal.CAD.FieldTestEvidence(1, powder.id)
+    assertEq(againMessage, 'that sample has already been field tested')
 end)
 
 test('the dashboard counts only what the officer may read', function()

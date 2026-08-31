@@ -32,7 +32,9 @@ end
 
 test('every configured callout template is valid', function()
     loadCallouts()
-    assertEq(#DAG.Federal.Callouts.Templates(), 7)
+    -- Every raw entry must survive normalization; a hard-coded count would
+    -- just break each time the catalog grows.
+    assertEq(#DAG.Federal.Callouts.Templates(), #Config.Federal.Callouts)
     assertFalse(harness.outputContains('ignoring callout template'))
 end)
 
@@ -359,11 +361,22 @@ end)
 test('the engine will not exceed maxActive per agency', function()
     loadCallouts()
     officer(1, 'fib', 2)
+    officer(2, 'fib', 2)
     Config.Federal.callouts.chance = 1.0
     Config.Federal.callouts.maxActive = 2
 
     for _ = 1, 6 do DAG.Federal.Callouts.Tick() end
     assertEq(DAG.Federal.Callouts.CountFor('fib'), 2)
+end)
+
+test('one officer alone is never handed more than one scene at a time', function()
+    loadCallouts()
+    officer(1, 'fib', 2)
+    Config.Federal.callouts.chance = 1.0
+    Config.Federal.callouts.maxActive = 5
+
+    for _ = 1, 6 do DAG.Federal.Callouts.Tick() end
+    assertEq(DAG.Federal.Callouts.CountFor('fib'), 1, 'the cap scales with officers on duty')
 end)
 
 test('no callouts are dispatched to an agency with nobody on duty', function()

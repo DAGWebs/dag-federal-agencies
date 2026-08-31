@@ -37,8 +37,7 @@ end
 CAD.Ask = ask
 
 local function stamp(seconds)
-    if type(seconds) ~= 'number' then return '' end
-    return os.date('%d %b %H:%M', seconds)
+    return Federal.Util.Stamp(seconds)
 end
 
 -- Dashboard ------------------------------------------------------------------
@@ -477,19 +476,61 @@ end
 function CAD.Evidence(incidentId)
     ask('evidence', function(list)
         local options = {}
+
+        if State.Can('actions.evidence') then
+            options[#options + 1] = {
+                title = 'Check in bagged evidence',
+                description = 'Hand over the sealed bags you are carrying',
+                icon = 'box',
+                onSelect = CAD.CheckIn
+            }
+        end
+
         for _, item in ipairs(list or {}) do
             local kind = Const.EvidenceKinds[item.kind]
+            local status = item.custody == 'field' and ('In the field with %s'):format(item.collectedBy or 'an officer')
+                or (item.analysed and (item.result or 'Analysed') or 'Awaiting analysis')
             options[#options + 1] = {
                 title = item.label,
-                description = ('%s | %s'):format(item.number, item.analysed and (item.result or 'Analysed') or 'Not analysed'),
+                description = ('%s | %s'):format(item.number, status),
                 icon = 'box',
                 badge = kind and kind.label or item.kind,
-                badgeTone = item.analysed and 'success' or nil,
+                badgeTone = item.analysed and 'success' or (item.custody == 'field' and 'accent' or nil),
                 onSelect = function() CAD.EvidenceItem(item) end
             }
         end
         show(id('evidence'), 'Evidence locker', ('%d item(s)'):format(#(list or {})), options)
     end, incidentId)
+end
+
+-- Handing over the sealed bags this officer is still carrying. One at a time,
+-- because each hand-over is its own chain-of-custody entry.
+function CAD.CheckIn()
+    ask('held', function(list)
+        if #(list or {}) == 0 then
+            return Bridge.Notify('You are not carrying any sealed evidence.', 'inform')
+        end
+
+        local options = {}
+        for _, item in ipairs(list) do
+            local kind = Const.EvidenceKinds[item.kind]
+            options[#options + 1] = {
+                title = item.label,
+                description = ('%s | sealed %s'):format(item.number, stamp(item.collectedAt)),
+                icon = 'box',
+                badge = kind and kind.label or item.kind,
+                onSelect = function()
+                    ask('checkin', function(record)
+                        if record then
+                            Bridge.Notify(('%s checked into the locker.'):format(record.number), 'success')
+                        end
+                        CAD.Evidence()
+                    end, item.id)
+                end
+            }
+        end
+        show(id('checkin'), 'Check in evidence', ('%d sealed bag(s) on you'):format(#list), options)
+    end)
 end
 
 function CAD.EvidenceItem(item)
@@ -500,6 +541,20 @@ function CAD.EvidenceItem(item)
         { title = 'Result', description = item.result or 'Not yet analysed', disabled = true }
     }
 
+    if item.description then
+        options[#options + 1] = { title = 'Notes', description = item.description, disabled = true }
+    end
+    if item.custody == 'field' then
+        options[#options + 1] = {
+            title = 'Custody: in the field',
+            description = 'Still sealed in an officer\'s bag - the lab will not touch it',
+            badge = 'Field', badgeTone = 'accent', disabled = true
+        }
+    end
+    if item.fieldTest then
+        options[#options + 1] = { title = 'Field test', description = item.fieldTest, disabled = true }
+    end
+
     options[#options + 1] = { title = 'Chain of custody', header = true }
     for _, entry in ipairs(item.chain or {}) do
         options[#options + 1] = { title = entry.action, description = ('%s | %s'):format(entry.actor, stamp(entry.at)), disabled = true }
@@ -507,24 +562,56 @@ function CAD.EvidenceItem(item)
 
     if not item.analysed and kind.analysable and State.Can('actions.evidence') then
         options[#options + 1] = { title = 'Actions', header = true }
+
+        -- The lab test reads differently per discipline: prints run against
+        -- AFIS, DNA against CODIS, everything else is bench work.
+        local testLabel = 'Analyse at the lab'
+        if item.kind == 'print' then testLabel = 'Run fingerprint comparison (AFIS)'
+        elseif item.kind == 'dna' then testLabel = 'Run DNA profile (CODIS)'
+        elseif item.kind == 'substance' then testLabel = 'Send for laboratory confirmation'
+        elseif item.kind == 'casing' then testLabel = 'Send to ballistics' end
+
         options[#options + 1] = {
-            title = 'Analyse at the lab',
-            description = 'You must be standing in an evidence lab',
+            title = testLabel,
+            description = item.custody == 'field'
+                and 'Check the bag into the locker first'
+                or 'You must be standing in an evidence lab',
             icon = 'wrench',
+            disabled = item.custody == 'field',
             onSelect = function()
                 local duration = ((Config.Federal or {}).evidence or {}).analysisTime or 12000
                 if not Federal.Progress.Run({
-                    label = ('Analysing %s'):format(item.number),
+                    label = ('Processing %s'):format(item.number),
                     duration = duration,
                     animation = 'analyse'
                 }) then return end
 
                 ask('analyse', function(analysed)
-                    if analysed then Bridge.Notify(analysed.result, 'success') end
+                    if analysed then Bridge.Notify(analysed.result, 'success', 9000) end
                     CAD.Evidence()
                 end, item.id)
             end
         }
+
+        if item.kind == 'substance' and not item.fieldTest then
+            options[#options + 1] = {
+                title = 'Field test (reagent kit)',
+                description = 'A presumptive roadside result; uses one test kit',
+                icon = 'wrench',
+                onSelect = function()
+                    if not Federal.Progress.Run({
+                        label = 'Running a reagent test',
+                        duration = 6000,
+                        animation = 'collect'
+                    }) then return end
+
+                    ask('fieldtest', function(tested)
+                        if tested then Bridge.Notify(tested.fieldTest, 'success', 9000) end
+                        CAD.Evidence()
+                    end, item.id)
+                end
+            }
+        end
     end
 
     if State.Can('cad.write') then

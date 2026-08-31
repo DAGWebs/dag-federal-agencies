@@ -174,6 +174,249 @@ function Bridge.RemoveItem(source, item, amount, metadata)
     return call('removeItem', source, item, amount, metadata) == true
 end
 
+-- Citizen and vehicle lookups ------------------------------------------------
+--
+-- The CAD's Lookup console reads the framework's OWN database (via oxmysql)
+-- so officers can find civilians and registered vehicles, not only people
+-- who already have a criminal record. Everything here is best-effort: no
+-- oxmysql, an unknown schema, or a failed query returns {} and the lookup
+-- degrades to criminal records plus online players.
+
+local function dbQuery(query, params)
+    if GetResourceState('oxmysql') ~= 'started' then return nil end
+    local waiting = promise.new()
+    local ok = pcall(function()
+        exports.oxmysql:query(query, params, function(rows) waiting:resolve(rows or {}) end)
+    end)
+    if not ok then return nil end
+    return Citizen.Await(waiting)
+end
+
+local function charinfoName(raw)
+    local ok, info = pcall(json.decode, raw or '')
+    if not ok or type(info) ~= 'table' then return nil end
+    local name = ('%s %s'):format(info.firstname or '', info.lastname or '')
+    name = name:gsub('^%s+', ''):gsub('%s+$', '')
+    return name ~= '' and name or nil
+end
+
+function Bridge.SearchCitizens(term)
+    term = tostring(term or '')
+    if term == '' then return {} end
+    local results = {}
+
+    if GetResourceState('qb-core') == 'started' or GetResourceState('qbx_core') == 'started' then
+        -- charinfo is a JSON blob; matching each word of the term against it
+        -- lowercased finds "John Smith" across the two separate JSON keys.
+        local where, params = {}, {}
+        for word in term:lower():gmatch('%S+') do
+            where[#where + 1] = 'LOWER(charinfo) LIKE ?'
+            params[#params + 1] = '%' .. word .. '%'
+        end
+        params[#params + 1] = term
+        local rows = dbQuery(('SELECT citizenid, charinfo FROM players WHERE (%s) OR citizenid = ? LIMIT 20')
+            :format(table.concat(where, ' AND ')), params)
+        for _, row in ipairs(rows or {}) do
+            results[#results + 1] = {
+                identifier = row.citizenid,
+                name = charinfoName(row.charinfo) or row.citizenid
+            }
+        end
+    elseif GetResourceState('es_extended') == 'started' then
+        local rows = dbQuery(
+            "SELECT identifier, firstname, lastname FROM users WHERE LOWER(CONCAT(firstname, ' ', lastname)) LIKE ? OR identifier = ? LIMIT 20",
+            { '%' .. term:lower() .. '%', term })
+        for _, row in ipairs(rows or {}) do
+            results[#results + 1] = {
+                identifier = row.identifier,
+                name = ('%s %s'):format(row.firstname or '', row.lastname or '')
+            }
+        end
+    end
+
+    -- Whatever the database said, online players are always searchable.
+    if #results == 0 then
+        local needle = term:lower()
+        for _, playerId in ipairs(GetPlayers()) do
+            local playerSource = tonumber(playerId)
+            local name = playerSource and Bridge.GetName(playerSource)
+            if name and name:lower():find(needle, 1, true) then
+                results[#results + 1] = { identifier = Bridge.GetIdentifier(playerSource), name = name }
+            end
+        end
+    end
+
+    return results
+end
+
+-- Everything registered to one person, for the CAD's person profile.
+function Bridge.VehiclesByOwner(identifier)
+    identifier = tostring(identifier or '')
+    if identifier == '' then return {} end
+    local results = {}
+
+    if GetResourceState('qb-core') == 'started' or GetResourceState('qbx_core') == 'started' then
+        local rows = dbQuery(
+            'SELECT plate, vehicle, garage FROM player_vehicles WHERE citizenid = ? LIMIT 20', { identifier })
+        for _, row in ipairs(rows or {}) do
+            results[#results + 1] = { plate = row.plate, model = tostring(row.vehicle or ''), garage = row.garage }
+        end
+    elseif GetResourceState('es_extended') == 'started' then
+        local rows = dbQuery(
+            'SELECT plate, vehicle FROM owned_vehicles WHERE owner = ? LIMIT 20', { identifier })
+        for _, row in ipairs(rows or {}) do
+            local model = row.vehicle
+            local ok, data = pcall(json.decode, row.vehicle or '')
+            if ok and type(data) == 'table' and data.model then model = data.model end
+            results[#results + 1] = { plate = row.plate, model = tostring(model or '') }
+        end
+    end
+    return results
+end
+
+-- What the framework knows about the person themselves: their vitals from
+-- charinfo and the licences on their metadata. Best-effort like the rest.
+function Bridge.CitizenInfo(identifier)
+    identifier = tostring(identifier or '')
+    if identifier == '' then return nil end
+
+    if GetResourceState('qb-core') == 'started' or GetResourceState('qbx_core') == 'started' then
+        local rows = dbQuery(
+            'SELECT charinfo, metadata, job FROM players WHERE citizenid = ? LIMIT 1', { identifier })
+        local row = rows and rows[1]
+        if not row then return nil end
+
+        local info = {}
+        local ok, charinfo = pcall(json.decode, row.charinfo or '')
+        if ok and type(charinfo) == 'table' then
+            info.firstname = charinfo.firstname
+            info.lastname = charinfo.lastname
+            info.birthdate = charinfo.birthdate
+            info.gender = charinfo.gender == 1 and 'Female' or charinfo.gender == 0 and 'Male' or tostring(charinfo.gender or '')
+            info.nationality = charinfo.nationality
+            info.phone = charinfo.phone
+        end
+        local jobOk, job = pcall(json.decode, row.job or '')
+        if jobOk and type(job) == 'table' then
+            info.job = job.label or job.name
+            if type(job.grade) == 'table' then info.jobPosition = job.grade.name end
+            info.jobBoss = job.isboss == true
+        end
+        local metaOk, metadata = pcall(json.decode, row.metadata or '')
+        if metaOk and type(metadata) == 'table' and type(metadata.licences) == 'table' then
+            local licences = {}
+            for name, held in pairs(metadata.licences) do
+                if held == true then licences[#licences + 1] = name end
+            end
+            table.sort(licences)
+            info.licences = licences
+        end
+        return info
+    elseif GetResourceState('es_extended') == 'started' then
+        local rows = dbQuery(
+            'SELECT firstname, lastname, dateofbirth, sex, job FROM users WHERE identifier = ? LIMIT 1', { identifier })
+        local row = rows and rows[1]
+        if not row then return nil end
+        return {
+            firstname = row.firstname,
+            lastname = row.lastname,
+            birthdate = row.dateofbirth,
+            gender = row.sex == 'f' and 'Female' or 'Male',
+            job = row.job
+        }
+    end
+    return nil
+end
+
+-- The licence names this framework knows about, for the certification
+-- prerequisite picker. Framework defaults plus the common addon licences;
+-- unknown ones can still be typed by hand in the panel.
+function Bridge.LicenceCatalog()
+    local names, seen = {}, {}
+    local function add(name)
+        if type(name) == 'string' and name ~= '' and not seen[name] then
+            seen[name] = true
+            names[#names + 1] = name
+        end
+    end
+
+    if GetResourceState('qb-core') == 'started' then
+        local ok, core = pcall(function() return exports['qb-core']:GetCoreObject() end)
+        local defaults = ok and core and core.Config and core.Config.Player and core.Config.Player.PlayerDefaults
+        local licences = defaults and defaults.metadata
+            and (defaults.metadata.licences or defaults.metadata.licenses) or nil
+        if type(licences) == 'table' then
+            for name in pairs(licences) do add(name) end
+        end
+    end
+
+    for _, name in ipairs({
+        'driver', 'weapon', 'business', 'hunting', 'fishing', 'pilot', 'boating',
+        'theory_plane', 'practical_plane', 'theory_heli', 'practical_heli'
+    }) do add(name) end
+
+    table.sort(names)
+    return names
+end
+
+-- The licences one player currently holds, as a name -> true map. Live
+-- framework data first, the database copy as fallback.
+function Bridge.PlayerLicences(source)
+    if GetResourceState('qb-core') == 'started' then
+        local ok, core = pcall(function() return exports['qb-core']:GetCoreObject() end)
+        local player = ok and core and core.Functions.GetPlayer(source) or nil
+        local metadata = player and player.PlayerData and player.PlayerData.metadata
+        local licences = metadata and (metadata.licences or metadata.licenses)
+        if type(licences) == 'table' then return licences end
+    end
+
+    local info = Bridge.CitizenInfo and Bridge.CitizenInfo(Bridge.GetIdentifier(source)) or nil
+    local map = {}
+    for _, name in ipairs(info and info.licences or {}) do map[name] = true end
+    return map
+end
+
+function Bridge.LookupVehicles(term)
+    term = tostring(term or '')
+    if term == '' then return {} end
+    local plate = '%' .. term:upper():gsub('%s', '') .. '%'
+    local owner = '%' .. term:lower() .. '%'
+    local results = {}
+
+    if GetResourceState('qb-core') == 'started' or GetResourceState('qbx_core') == 'started' then
+        local rows = dbQuery(
+            "SELECT pv.plate, pv.vehicle, p.charinfo FROM player_vehicles pv"
+            .. " LEFT JOIN players p ON p.citizenid = pv.citizenid"
+            .. " WHERE REPLACE(UPPER(pv.plate), ' ', '') LIKE ? OR LOWER(p.charinfo) LIKE ? LIMIT 20",
+            { plate, owner })
+        for _, row in ipairs(rows or {}) do
+            results[#results + 1] = {
+                plate = row.plate,
+                model = tostring(row.vehicle or ''),
+                owner = charinfoName(row.charinfo)
+            }
+        end
+    elseif GetResourceState('es_extended') == 'started' then
+        local rows = dbQuery(
+            "SELECT ov.plate, ov.vehicle, u.firstname, u.lastname FROM owned_vehicles ov"
+            .. " LEFT JOIN users u ON u.identifier = ov.owner"
+            .. " WHERE REPLACE(UPPER(ov.plate), ' ', '') LIKE ? OR LOWER(CONCAT(u.firstname, ' ', u.lastname)) LIKE ? LIMIT 20",
+            { plate, owner })
+        for _, row in ipairs(rows or {}) do
+            local model = row.vehicle
+            local ok, data = pcall(json.decode, row.vehicle or '')
+            if ok and type(data) == 'table' and data.model then model = data.model end
+            results[#results + 1] = {
+                plate = row.plate,
+                model = tostring(model or ''),
+                owner = ('%s %s'):format(row.firstname or '', row.lastname or '')
+            }
+        end
+    end
+
+    return results
+end
+
 function Bridge.Notify(source, message, kind, duration)
     TriggerClientEvent(Bridge.Event('client:notify'), source, message, kind, duration)
 end

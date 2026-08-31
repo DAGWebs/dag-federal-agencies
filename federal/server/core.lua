@@ -28,6 +28,57 @@ local agencies = DAG.Repository.Create('federal_agencies', {
 
 Core.agencies = agencies
 
+-- Which sub-department (division) a member belongs to, keyed by framework
+-- identifier so it follows the character. The division catalog itself lives
+-- on the agency record; this store only holds assignments.
+local memberDivisions = DAG.Repository.Create('federal_member_divisions')
+
+-- A member's callsign SUFFIX ('12', 'ADAM'), keyed by agency + identifier.
+-- Only the suffix is stored: the prefix is composed at read time from the
+-- member's division (or agency), so renaming a prefix or moving somebody
+-- into SWAT re-brands their callsign without touching this store.
+local callsigns = DAG.Repository.Create('federal_callsigns')
+
+function Core.DivisionAssignment(identifier)
+    if type(identifier) ~= 'string' then return nil end
+    local record = memberDivisions.get(identifier)
+    if not record then return nil end
+    return record.division, tonumber(record.grade) or 0
+end
+
+-- Resolves the assignment against the agency's catalog: a stale assignment to
+-- a deleted division reads as "no division" rather than a dangling id.
+function Core.DivisionOf(identifier, agency)
+    local divisionId = Core.DivisionAssignment(identifier)
+    if not divisionId or type(agency) ~= 'table' then return nil end
+    return Schema.FindById(agency.divisions or {}, divisionId)
+end
+
+-- The member's rank on the division's own ladder: the highest division rank
+-- whose grade they have reached, like Core.Rank does for the agency ladder.
+function Core.DivisionRankOf(identifier, division)
+    if type(division) ~= 'table' or #(division.ranks or {}) == 0 then return nil end
+    local _, grade = Core.DivisionAssignment(identifier)
+    local best
+    for _, rank in ipairs(division.ranks) do
+        if (grade or 0) >= rank.grade and (not best or rank.grade > best.grade) then best = rank end
+    end
+    return best
+end
+
+function Core.AssignDivision(identifier, agencyId, divisionId, grade)
+    if type(identifier) ~= 'string' or identifier == '' then return false, 'no identifier' end
+    if divisionId == nil then
+        memberDivisions.delete(identifier)
+        return true
+    end
+    local saved, message = memberDivisions.save(identifier, {
+        id = identifier, agency = agencyId, division = divisionId,
+        grade = math.floor(Util.Clamp(tonumber(grade) or 0, 0, 100))
+    })
+    return saved ~= nil, message
+end
+
 -- Permissions a player holds by virtue of out-ranking `agency.bossGrade`,
 -- whatever their rank happens to list. Without this a server that rewrites the
 -- rank ladder can end up with an agency nobody can administer.
@@ -72,6 +123,23 @@ local function build()
         else
             local agency, message = Schema.Agency(stored)
             if agency then
+                -- Baseline kit the config ships (the MDT tablet, evidence
+                -- bags, test kits...) re-joins an edited agency's armory:
+                -- an agency saved BEFORE a config addition would otherwise
+                -- never see the new gear. Items a director deliberately
+                -- removed stay removed via the armoryRemoved tombstones.
+                local baseline = merged[agency.id]
+                if baseline then
+                    local removed = {}
+                    for _, removedId in ipairs(stored.armoryRemoved or {}) do removed[removedId] = true end
+                    agency.armoryRemoved = stored.armoryRemoved
+                    for _, entry in ipairs(baseline.armory or {}) do
+                        if not removed[entry.id] and not Schema.FindById(agency.armory or {}, entry.id) then
+                            agency.armory = agency.armory or {}
+                            agency.armory[#agency.armory + 1] = Util.Copy(entry)
+                        end
+                    end
+                end
                 if not merged[agency.id] then order[#order + 1] = agency.id end
                 merged[agency.id] = agency
             else
@@ -126,25 +194,92 @@ end
 -- The player's agency membership, derived from the framework job. A job that
 -- cannot be read is a denial: Bridge.GetJob returns nil on frameworks with no
 -- job support, and treating that as "unemployed" would match a policy entry.
+-- Borrowed terminal sessions --------------------------------------------------
+--
+-- A stolen MDT tablet or a stolen agency vehicle is still logged in as the
+-- member who drew it. Whoever holds it works the CAD ON THE OWNER'S
+-- identity: their filings carry the owner's name, they can read and write
+-- (never expunge, never issue warrants), and the session dies on its own.
+
+local borrowedSessions = {}
+
+function Core.BorrowSession(source, session)
+    if type(session) ~= 'table' or type(session.agency) ~= 'string' then return false end
+    borrowedSessions[source] = {
+        agency = session.agency,
+        name = session.name or 'Unknown operator',
+        identifier = session.identifier or ('terminal:%d'):format(source),
+        callsign = session.callsign,
+        expires = os.time() + 600
+    }
+    return true
+end
+
+function Core.BorrowedSession(source)
+    local session = borrowedSessions[source]
+    if session and session.expires > os.time() then return session end
+    borrowedSessions[source] = nil
+    return nil
+end
+
+AddEventHandler('playerDropped', function()
+    borrowedSessions[source] = nil
+end)
+
+-- The membership a live borrowed session stands in for: the ORIGINAL
+-- owner's identity with CAD-only permissions.
+local function borrowedMembership(source)
+    local session = Core.BorrowedSession(source)
+    if not session then return nil end
+    local stolen = registry().map[session.agency]
+    if not stolen then return nil end
+    return {
+        source = source,
+        identifier = session.identifier,
+        name = session.name,
+        agency = Util.Copy(stolen),
+        grade = 0,
+        rank = {
+            grade = 0,
+            label = 'Terminal session',
+            permissions = { ['cad.view'] = true, ['cad.write'] = true }
+        },
+        isBoss = false,
+        onDuty = true,
+        borrowed = true
+    }
+end
+
+local function borrowedStandIn(source, permission)
+    if permission ~= 'cad.view' and permission ~= 'cad.write' then return nil end
+    return borrowedMembership(source)
+end
+
 function Core.Membership(source)
     if not Core.Enabled() or type(source) ~= 'number' or source <= 0 then return nil end
 
     local job = Bridge.GetJob(source)
-    if not job then return nil end
+    local agency = job and Core.AgencyForJob(job.name) or nil
 
-    local agency = Core.AgencyForJob(job.name)
-    if not agency then return nil end
+    if not agency then
+        -- No real membership: an unexpired borrowed session stands in.
+        return borrowedMembership(source)
+    end
 
     local unit = units[source]
+    local identifier = Bridge.GetIdentifier(source)
+    local division = Core.DivisionOf(identifier, agency)
     return {
         source = source,
-        identifier = Bridge.GetIdentifier(source),
+        identifier = identifier,
         name = Bridge.GetName(source),
         agency = agency,
         job = job,
         grade = job.grade,
         rank = Core.Rank(agency, job.grade),
         isBoss = job.grade >= (agency.bossGrade or 4),
+        division = division,
+        divisionRank = division and Core.DivisionRankOf(identifier, division) or nil,
         onDuty = unit ~= nil,
         unit = unit and Util.Copy(unit) or nil
     }
@@ -198,11 +333,19 @@ function Core.Require(source, permission, options)
     end
 
     if not Core.Can(source, permission) then
+        -- A member whose own rank cannot do this may still be holding a
+        -- terminal that is signed in as somebody whose rank can.
+        local standIn = borrowedStandIn(source, permission)
+        if standIn then return standIn end
         Bridge.Notify(source, 'Your rank does not authorize that.', 'error')
         return nil
     end
 
     if options.duty ~= false and settings().requireDuty ~= false and not membership.onDuty and not Core.IsAdmin(source) then
+        -- Off duty, but working a signed-in terminal: the SESSION is on
+        -- duty even when the person holding it is not.
+        local standIn = borrowedStandIn(source, permission)
+        if standIn then return standIn end
         Bridge.Notify(source, 'Clock on at a station first.', 'error')
         return nil
     end
@@ -277,6 +420,113 @@ function Core.RequireZone(source, membership, kind)
     return true, zone, station
 end
 
+-- Callsigns -----------------------------------------------------------------
+--
+-- A callsign belongs to the member, not to the clock-in: whoever signs on
+-- gets THEIR callsign, not FIB-<whatever number they happened to be>. The
+-- left half is a fixed prefix set per agency (and overridable per division)
+-- in the config panel; nobody types around it. The right half is a stored
+-- suffix - auto-numbered on first clock-in, changeable by roster managers
+-- for anyone, and by members themselves only when their rank carries
+-- 'callsign.self'.
+
+local function callsignKey(agencyId, identifier)
+    return ('%s:%s'):format(agencyId, identifier)
+end
+
+-- The forced left half for this member: division prefix, else agency prefix,
+-- else the agency short code with a dash.
+function Core.CallsignPrefix(membership)
+    if membership.division and membership.division.callsignPrefix then
+        return membership.division.callsignPrefix
+    end
+    return membership.agency.callsignPrefix or (membership.agency.short .. '-')
+end
+
+-- The lowest positive number no stored suffix in this agency already uses.
+local function nextFreeSuffix(agencyId)
+    local used = {}
+    for key, record in pairs(callsigns.all()) do
+        if key:sub(1, #agencyId + 1) == agencyId .. ':' then
+            local number = tonumber(record.suffix)
+            if number then used[number] = true end
+        end
+    end
+    local candidate = 1
+    while used[candidate] do candidate = candidate + 1 end
+    return tostring(candidate)
+end
+
+-- The member's full callsign, assigning a numbered suffix on first use.
+function Core.CallsignFor(membership)
+    local key = callsignKey(membership.agency.id, membership.identifier)
+    local record = callsigns.get(key)
+    if not record then
+        record = { suffix = nextFreeSuffix(membership.agency.id), at = os.time() }
+        callsigns.save(key, record)
+    end
+    return Core.CallsignPrefix(membership) .. record.suffix
+end
+
+-- A typed suffix, cleaned: uppercased, spaces and punctuation dropped, and a
+-- prefix the user typed anyway stripped off rather than doubled.
+local function normalizeSuffix(prefix, input)
+    local suffix = tostring(input or ''):upper():gsub('%s', '')
+    if suffix:sub(1, #prefix) == prefix then suffix = suffix:sub(#prefix + 1) end
+    suffix = suffix:gsub('[^%w]', '')
+    if suffix == '' or #suffix > 8 then return nil end
+    return suffix
+end
+
+-- Setting a callsign. With no target (or targeting yourself) this is the
+-- self-service path and needs 'callsign.self'; pointing it at somebody else
+-- is roster management. Either way the prefix is forced.
+function Core.SetCallsign(source, targetSource, input)
+    targetSource = tonumber(targetSource) or source
+    local self = targetSource == source
+
+    local actor = Core.Membership(source)
+    if not actor then return nil, 'not a member of a federal agency' end
+
+    if self then
+        if not (Core.Can(source, 'callsign.self') or Core.Can(source, 'roster.manage') or Core.IsAdmin(source)) then
+            return nil, 'your rank does not choose its own callsign'
+        end
+    elseif not (Core.Can(source, 'roster.manage') or Core.IsAdmin(source)) then
+        return nil, 'setting callsigns is a roster action'
+    end
+
+    local target = self and actor or Core.Membership(targetSource)
+    if not target then return nil, 'they are not a member of a federal agency' end
+    if target.agency.id ~= actor.agency.id and not Core.IsAdmin(source) then
+        return nil, 'they serve a different agency'
+    end
+
+    local prefix = Core.CallsignPrefix(target)
+    local suffix = normalizeSuffix(prefix, input)
+    if not suffix then return nil, ('a callsign is %s plus 1-8 letters or digits'):format(prefix) end
+
+    -- One suffix per member; two units answering to the same callsign is a
+    -- radio disaster, so a taken suffix is refused outright.
+    local key = callsignKey(target.agency.id, target.identifier)
+    for otherKey, record in pairs(callsigns.all()) do
+        if otherKey ~= key and record.suffix == suffix
+            and otherKey:sub(1, #target.agency.id + 1) == target.agency.id .. ':' then
+            return nil, ('%s%s is already assigned'):format(prefix, suffix)
+        end
+    end
+
+    callsigns.save(key, { suffix = suffix, setBy = actor.name, at = os.time() })
+
+    -- A unit already on the air re-brands live.
+    local unit = units[targetSource]
+    if unit and unit.identifier == target.identifier then
+        unit.callsign = prefix .. suffix
+        Core.BroadcastRoster(unit.agency)
+    end
+    return prefix .. suffix
+end
+
 -- Duty roster ---------------------------------------------------------------
 
 function Core.SetDuty(source, onDuty, stationId, callsign)
@@ -304,7 +554,11 @@ function Core.SetDuty(source, onDuty, stationId, callsign)
         station = station and station.id or nil,
         rank = membership.rank and membership.rank.label or 'Unranked',
         grade = membership.grade,
-        callsign = Util.Text(callsign, 12, ('%s-%d'):format(membership.agency.short, source)),
+        division = membership.division and membership.division.label or nil,
+        divisionRank = membership.divisionRank and membership.divisionRank.label or nil,
+        -- Their callsign, not their clock-in number. The client-typed value
+        -- is deliberately ignored: assignment goes through Core.SetCallsign.
+        callsign = Core.CallsignFor(membership),
         status = 'available',
         since = os.time()
     }
@@ -461,6 +715,9 @@ function Core.Context(source)
             grade = membership.grade,
             rank = membership.rank and membership.rank.label or 'Unranked',
             isBoss = membership.isBoss,
+            division = membership.division and membership.division.label or nil,
+            divisionId = membership.division and membership.division.id or nil,
+            divisionRank = membership.divisionRank and membership.divisionRank.label or nil,
             onDuty = membership.onDuty,
             unit = membership.unit
         } or nil
@@ -560,6 +817,100 @@ RegisterNetEvent(Federal.Net('duty'), function(onDuty, stationId, callsign)
     Core.SetDuty(playerSource, onDuty, stationId, callsign)
     Bridge.Notify(playerSource, onDuty and 'You are now on duty.' or 'You are now off duty.', 'success')
     Core.Sync(playerSource)
+end)
+
+-- What the callsign dialog needs to render: the forced prefix, the current
+-- callsign, and whether this player may self-serve at all.
+Bridge.RegisterCallback(Federal.Net('callsign:info'), function(source, reply)
+    local membership = Core.Membership(source)
+    if not membership then return reply(nil) end
+    reply({
+        prefix = Core.CallsignPrefix(membership),
+        current = Core.CallsignFor(membership),
+        canSelf = Core.Can(source, 'callsign.self') or Core.Can(source, 'roster.manage') or Core.IsAdmin(source)
+    })
+end)
+
+RegisterNetEvent(Federal.Net('callsign:set'), function(targetSource, suffix)
+    local playerSource = source
+    local callsign, message = Core.SetCallsign(playerSource, targetSource, suffix)
+    Bridge.Notify(playerSource, callsign and ('Callsign set: %s'):format(callsign) or message,
+        callsign and 'success' or 'error')
+end)
+
+-- Radio traffic: one keyed call sets the unit's status AND reads out on
+-- every on-duty unit's screen, phrased on the phonetic callsign the way it
+-- was spoken. The phrase set is server-owned; the client only names a
+-- status, so nobody broadcasts arbitrary text on the working channel.
+local RADIO_PHRASES = {
+    enroute = 'show me en route',
+    onscene = 'show me on scene',
+    busy = 'show me code 6, out for investigation',
+    available = 'show me back in service',
+    panic = 'officer needs assistance, send everything'
+}
+
+local RADIO_PHONETIC = {
+    A = 'Adam', B = 'Boy', C = 'Charles', D = 'David', E = 'Edward', F = 'Frank',
+    G = 'George', H = 'Henry', I = 'Ida', J = 'John', K = 'King', L = 'Lincoln',
+    M = 'Mary', N = 'Nora', O = 'Ocean', P = 'Paul', Q = 'Queen', R = 'Robert',
+    S = 'Sam', T = 'Tom', U = 'Union', V = 'Victor', W = 'William',
+    X = 'X-ray', Y = 'Young', Z = 'Zebra'
+}
+
+local function radioPhonetic(callsign)
+    local parts = {}
+    for character in tostring(callsign or ''):gmatch('%w') do
+        parts[#parts + 1] = RADIO_PHONETIC[character:upper()] or character
+    end
+    return #parts > 0 and table.concat(parts, '-') or 'unit'
+end
+
+RegisterNetEvent(Federal.Net('radio:call'), function(status)
+    local playerSource = source
+    if type(status) ~= 'string' or not RADIO_PHRASES[status] then return end
+
+    local membership = Core.Membership(playerSource)
+    if not membership or membership.borrowed or not membership.onDuty then return end
+
+    Core.SetStatus(playerSource, status)
+
+    local unit = units[playerSource]
+    local suffix = ''
+    if (status == 'enroute' or status == 'onscene')
+        and Federal.Callouts and Federal.Callouts.AssignedNumber then
+        local number = Federal.Callouts.AssignedNumber(playerSource)
+        if number then suffix = (' to %s'):format(number) end
+    end
+
+    local text = ('\u{1F4FB} %s: %s%s.'):format(
+        radioPhonetic(unit and unit.callsign), RADIO_PHRASES[status], suffix)
+    for _, target in ipairs(Core.OnDutySources(membership.agency.id)) do
+        TriggerClientEvent(Federal.Net('radio:traffic'), target, text)
+    end
+end)
+
+-- Setting a unit's status from the terminal: your own freely, somebody
+-- else's only with roster.manage (the dispatch seat's prerogative).
+RegisterNetEvent(Federal.Net('unit:status'), function(targetSource, status)
+    local playerSource = source
+    targetSource = tonumber(targetSource) or playerSource
+    if type(status) ~= 'string' or not Const.UnitStatus[status] then return end
+
+    if targetSource ~= playerSource then
+        if not (Core.Can(playerSource, 'roster.manage') or Core.IsAdmin(playerSource)) then
+            return Bridge.Notify(playerSource, "Setting another unit's status is a roster action.", 'error')
+        end
+        local actor = Core.Membership(playerSource)
+        local unit = units[targetSource]
+        if not actor or not unit or (unit.agency ~= actor.agency.id and not Core.IsAdmin(playerSource)) then
+            return Bridge.Notify(playerSource, 'That unit is not on your roster.', 'error')
+        end
+    end
+
+    if Core.SetStatus(targetSource, status) then
+        Bridge.Notify(playerSource, ('Status set: %s'):format(Const.UnitStatus[status].label), 'inform')
+    end
 end)
 
 RegisterNetEvent(Federal.Net('status'), function(status)

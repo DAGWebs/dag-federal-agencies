@@ -26,8 +26,22 @@ local function fail(message)
     return nil, message
 end
 
+-- The top of an agency's rank ladder. The highest rank may configure the
+-- agency whether or not its permission list happens to include editor.manage,
+-- so a rewritten ladder can never lock the director out of the config panel.
+local function topGrade(agency)
+    local top = 0
+    for _, rank in ipairs(agency and agency.ranks or {}) do
+        if rank.grade > top then top = rank.grade end
+    end
+    return top
+end
+
+Editor.TopGrade = topGrade
+
 -- Resolves the agency this player is allowed to edit. Admins may name any
--- agency; everyone else edits their own and nothing else.
+-- agency; everyone else edits their own and nothing else, holding either
+-- editor.manage or the agency's highest rank.
 local function editable(source, agencyId)
     if Core.IsAdmin(source) then
         local agency = Core.Agency(agencyId)
@@ -35,15 +49,32 @@ local function editable(source, agencyId)
         return agency
     end
 
-    if not Core.Can(source, 'editor.manage') then return nil, 'not authorized' end
-
     local membership = Core.Membership(source)
     if not membership then return nil, 'not authorized' end
+
+    local allowed = Core.Can(source, 'editor.manage')
+        or membership.grade >= topGrade(membership.agency)
+    if not allowed then return nil, 'not authorized' end
+
     if agencyId and agencyId ~= membership.agency.id then return nil, 'you may only edit your own agency' end
     return membership.agency
 end
 
 Editor.Editable = editable
+
+-- Domain-scoped variant: an agency is also editable by a member holding the
+-- named permission over it, so uniform.manage really does mean "create and
+-- edit uniforms" without needing the whole editor.
+function Editor.EditableFor(source, agencyId, permission)
+    local agency, message = editable(source, agencyId)
+    if agency then return agency end
+
+    local membership = Core.Membership(source)
+    if not membership then return nil, message end
+    if agencyId and agencyId ~= membership.agency.id then return nil, 'you may only edit your own agency' end
+    if not Core.Can(source, permission) then return nil, message end
+    return membership.agency
+end
 
 local function persist(agency)
     return Federal.Uniforms.PersistAgency(agency)
@@ -107,6 +138,14 @@ function Editor.UpdateAgency(source, agencyId, changes)
     if changes.color ~= nil then agency.color = Util.Text(changes.color, 9, agency.color) end
     if changes.bossGrade ~= nil then agency.bossGrade = math.floor(Util.Clamp(tonumber(changes.bossGrade) or agency.bossGrade, 0, 100)) end
     if changes.callouts ~= nil then agency.callouts = changes.callouts == true end
+    -- An empty string clears the prefix (fall back to the short code); nil
+    -- leaves it untouched.
+    if changes.callsignPrefix ~= nil then
+        agency.callsignPrefix = Schema.CallsignPrefix(changes.callsignPrefix)
+    end
+    if type(changes.npcCallouts) == 'table' then
+        agency.npcCallouts = Util.Merge(agency.npcCallouts or {}, changes.npcCallouts)
+    end
     if type(changes.jobs) == 'table' then agency.jobs = changes.jobs end
     if type(changes.blip) == 'table' then agency.blip = changes.blip end
     if type(changes.cad) == 'table' then agency.cad = Util.Merge(agency.cad, changes.cad) end
@@ -138,11 +177,27 @@ function Editor.SaveStation(source, agencyId, payload)
     if not coords then return fail('no position for that station') end
 
     local existing = payload.id and Schema.FindById(agency.stations or {}, payload.id) or nil
+    -- An omitted flag keeps the stored value; `and/or` would turn a stored
+    -- false into the schema default.
+    local publicBlip = payload.publicBlip
+    if publicBlip == nil and existing then publicBlip = existing.publicBlip end
+
+    -- The map icon: a table sets it, `false` clears it back to the agency
+    -- default, nil keeps whatever the station had.
+    local blip = payload.blip
+    if blip == false then
+        blip = nil
+    elseif type(blip) ~= 'table' then
+        blip = existing and existing.blip or nil
+    end
+
     local station, stationMessage = Schema.Station({
         id = payload.id,
         label = payload.label or (existing and existing.label),
+        kind = payload.kind or (existing and existing.kind),
+        publicBlip = publicBlip,
         coords = coords,
-        blip = payload.blip or (existing and existing.blip),
+        blip = blip,
         -- Moving a station keeps its rooms; they are placed individually.
         zones = existing and existing.zones or {}
     })
@@ -228,6 +283,87 @@ function Editor.DeleteZone(source, agencyId, stationId, zoneId)
     return zone
 end
 
+-- Divisions ------------------------------------------------------------------------
+
+function Editor.SaveDivision(source, agencyId, payload)
+    local agency, message = Editor.EditableFor(source, agencyId, 'roster.manage')
+    if not agency then return fail(message) end
+    payload = type(payload) == 'table' and payload or {}
+
+    -- A meta edit (rename, joinable grade) must not wipe the division's own
+    -- rank ladder; ranks have their own operations below.
+    local existing = payload.id and Schema.FindById(agency.divisions or {}, payload.id) or nil
+    if payload.ranks == nil and existing then payload = Federal.Util.Merge(existing, payload) end
+
+    local division, divisionMessage = Schema.Division(payload)
+    if not division then return fail(divisionMessage) end
+
+    agency.divisions = agency.divisions or {}
+    local _, index = Schema.FindById(agency.divisions, division.id)
+    if index then
+        agency.divisions[index] = division
+    else
+        agency.divisions[#agency.divisions + 1] = division
+    end
+
+    local saved, saveMessage = persist(agency)
+    if not saved then return fail(saveMessage) end
+    return division
+end
+
+-- Division ranks: a taskforce's own ladder (SWAT Operator, Team Lead...).
+function Editor.SaveDivisionRank(source, agencyId, divisionId, payload)
+    local agency, message = Editor.EditableFor(source, agencyId, 'roster.manage')
+    if not agency then return fail(message) end
+
+    local division = Schema.FindById(agency.divisions or {}, divisionId)
+    if not division then return fail('no such division') end
+
+    local rank, rankMessage = Schema.DivisionRank(payload)
+    if not rank then return fail(rankMessage) end
+
+    division.ranks = division.ranks or {}
+    local _, index = Schema.FindById(division.ranks, rank.id)
+    if index then
+        division.ranks[index] = rank
+    else
+        division.ranks[#division.ranks + 1] = rank
+    end
+
+    local saved, saveMessage = persist(agency)
+    if not saved then return fail(saveMessage) end
+    return rank
+end
+
+function Editor.DeleteDivisionRank(source, agencyId, divisionId, grade)
+    local agency, message = Editor.EditableFor(source, agencyId, 'roster.manage')
+    if not agency then return fail(message) end
+
+    local division = Schema.FindById(agency.divisions or {}, divisionId)
+    if not division then return fail('no such division') end
+
+    local rank, index = Schema.FindById(division.ranks or {}, ('grade-%d'):format(math.floor(tonumber(grade) or -1)))
+    if not index then return fail('no such division rank') end
+
+    table.remove(division.ranks, index)
+    local saved, saveMessage = persist(agency)
+    if not saved then return fail(saveMessage) end
+    return rank
+end
+
+function Editor.DeleteDivision(source, agencyId, divisionId)
+    local agency, message = Editor.EditableFor(source, agencyId, 'roster.manage')
+    if not agency then return fail(message) end
+
+    local division, index = Schema.FindById(agency.divisions or {}, divisionId)
+    if not index then return fail('no such division') end
+
+    table.remove(agency.divisions, index)
+    local saved, saveMessage = persist(agency)
+    if not saved then return fail(saveMessage) end
+    return division
+end
+
 -- Ranks ----------------------------------------------------------------------------
 
 function Editor.SaveRank(source, agencyId, payload)
@@ -270,6 +406,76 @@ end
 
 -- Net wiring ------------------------------------------------------------------------
 
+-- Certifications: the awards catalog directors maintain (Field Training,
+-- SWAT, Firearms...). Awarding them to members happens in Personnel.
+function Editor.SaveCertification(source, agencyId, payload)
+    local agency, message = Editor.EditableFor(source, agencyId, 'roster.manage')
+    if not agency then return fail(message) end
+
+    local cert, certMessage = Schema.Certification(type(payload) == 'table' and payload or {})
+    if not cert then return fail(certMessage) end
+
+    agency.certifications = agency.certifications or {}
+    local _, index = Schema.FindById(agency.certifications, cert.id)
+    if index then
+        agency.certifications[index] = cert
+    else
+        agency.certifications[#agency.certifications + 1] = cert
+    end
+
+    local saved, saveMessage = persist(agency)
+    if not saved then return fail(saveMessage) end
+    return cert
+end
+
+function Editor.DeleteCertification(source, agencyId, certId)
+    local agency, message = Editor.EditableFor(source, agencyId, 'roster.manage')
+    if not agency then return fail(message) end
+
+    local cert, index = Schema.FindById(agency.certifications or {}, certId)
+    if not index then return fail('no such certification') end
+
+    table.remove(agency.certifications, index)
+    local saved, saveMessage = persist(agency)
+    if not saved then return fail(saveMessage) end
+    return cert
+end
+
+-- Investigation flows: what witnesses near a scene say, per case-type
+-- keyword. Maintained in /fedconfig; the interview engine reads them.
+function Editor.SaveInvestigation(source, agencyId, payload)
+    local agency, message = Editor.EditableFor(source, agencyId, 'roster.manage')
+    if not agency then return fail(message) end
+
+    local flow, flowMessage = Schema.InvestigationFlow(type(payload) == 'table' and payload or {})
+    if not flow then return fail(flowMessage) end
+
+    agency.investigations = agency.investigations or {}
+    local _, index = Schema.FindById(agency.investigations, flow.id)
+    if index then
+        agency.investigations[index] = flow
+    else
+        agency.investigations[#agency.investigations + 1] = flow
+    end
+
+    local saved, saveMessage = persist(agency)
+    if not saved then return fail(saveMessage) end
+    return flow
+end
+
+function Editor.DeleteInvestigation(source, agencyId, flowId)
+    local agency, message = Editor.EditableFor(source, agencyId, 'roster.manage')
+    if not agency then return fail(message) end
+
+    local flow, index = Schema.FindById(agency.investigations or {}, flowId)
+    if not index then return fail('no such investigation flow') end
+
+    table.remove(agency.investigations, index)
+    local saved, saveMessage = persist(agency)
+    if not saved then return fail(saveMessage) end
+    return flow
+end
+
 -- One handler shape for every editor operation: run it, report the reason on
 -- failure, and let PersistAgency push the new registry to every client.
 local function editorEvent(name, handler, describe)
@@ -292,5 +498,13 @@ editorEvent('zoneSave', Editor.SaveZone, function(zone) return ('Placed %s.'):fo
 editorEvent('zoneDelete', Editor.DeleteZone, function(zone) return ('Removed %s.'):format(zone.label) end)
 editorEvent('rankSave', Editor.SaveRank, function(rank) return ('Saved rank %s.'):format(rank.label) end)
 editorEvent('rankDelete', Editor.DeleteRank, function(rank) return ('Removed rank %s.'):format(rank.label) end)
+editorEvent('divisionSave', Editor.SaveDivision, function(division) return ('Saved division %s.'):format(division.label) end)
+editorEvent('divisionDelete', Editor.DeleteDivision, function(division) return ('Removed division %s.'):format(division.label) end)
+editorEvent('divisionRankSave', Editor.SaveDivisionRank, function(rank) return ('Saved division rank %s.'):format(rank.label) end)
+editorEvent('divisionRankDelete', Editor.DeleteDivisionRank, function(rank) return ('Removed division rank %s.'):format(rank.label) end)
+editorEvent('certSave', Editor.SaveCertification, function(cert) return ('Saved certification %s.'):format(cert.label) end)
+editorEvent('certDelete', Editor.DeleteCertification, function(cert) return ('Removed certification %s.'):format(cert.label) end)
+editorEvent('invSave', Editor.SaveInvestigation, function(flow) return ('Saved investigation flow "%s".'):format(flow.match) end)
+editorEvent('invDelete', Editor.DeleteInvestigation, function(flow) return ('Removed investigation flow "%s".'):format(flow.match) end)
 
 return Editor

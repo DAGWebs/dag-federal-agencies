@@ -62,15 +62,19 @@ CreateThread(function()
             local at = positionOf(entry)
             local distance = #(playerCoords - at)
             if distance <= (entry.drawDistance or Config.InteractionDrawDistance) then
-                sleep = 0
-                DrawMarker(entry.marker or 2, at.x, at.y, at.z,
-                    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.2, 0.2,
-                    80, 160, 255, 180, false, true, 2, false, nil, nil, false)
+                -- An entry the player cannot use right now draws nothing at
+                -- all: an off-duty officer's armory shows no arrow, not an
+                -- arrow that refuses. Same check that gates the keypress.
+                if not entry.canInteract or entry.canInteract(entry) == true then
+                    sleep = 0
+                    DrawMarker(entry.marker or 2, at.x, at.y, at.z,
+                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.2, 0.2,
+                        80, 160, 255, 180, false, true, 2, false, nil, nil, false)
 
-                if distance <= (entry.distance or Config.InteractionDistance)
-                    and (not closestDistance or distance < closestDistance)
-                    and (not entry.canInteract or entry.canInteract(entry) == true) then
-                    closest, closestDistance = entry, distance
+                    if distance <= (entry.distance or Config.InteractionDistance)
+                        and (not closestDistance or distance < closestDistance) then
+                        closest, closestDistance = entry, distance
+                    end
                 end
             end
         end

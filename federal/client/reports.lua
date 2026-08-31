@@ -68,7 +68,7 @@ function Reports.Board()
         for _, report in ipairs(list or {}) do
             options[#options + 1] = {
                 title = report.text,
-                description = ('From %s | %s'):format(report.caller, os.date('%H:%M', report.at or 0)),
+                description = ('From %s | %s'):format(report.caller, DAG.Federal.Util.StampClock(report.at)),
                 icon = 'info',
                 badge = report.status == 'responding' and 'Responding' or 'New',
                 badgeTone = report.status == 'responding' and 'accent' or 'danger',

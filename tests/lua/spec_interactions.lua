@@ -60,7 +60,7 @@ test('the keypress activates the closest entry', function()
     assertEq(activated, 'near')
 end)
 
-test('canInteract gates the prompt', function()
+test('canInteract gates the prompt AND the marker', function()
     local _, thread = loadInteractions()
     DAG.Interactions.Register({
         id = 'gated',
@@ -72,7 +72,9 @@ test('canInteract gates the prompt', function()
     harness.playerCoords = vector3(0, 0, 0)
     harness.runThread(thread)
     assertEq(#harness.helpText, 0)
-    assertEq(#harness.drawnMarkers, 1, 'the marker still renders')
+    -- An entry the player cannot use draws nothing: an off-duty officer's
+    -- armory shows no arrow, not an arrow that refuses.
+    assertEq(#harness.drawnMarkers, 0, 'a gated entry is invisible')
 end)
 
 test('a blocked closest entry does not mask an eligible one behind it', function()

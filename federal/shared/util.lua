@@ -110,8 +110,14 @@ end
 -- Coordinates arrive from config as vector3 and from the editor as a plain
 -- table over the network. Both are normalized to a plain table for storage so
 -- the JSON store never has to serialize a userdata.
+--
+-- In-game, CfxLua vectors are a first-class type: type(vector3(...)) returns
+-- 'vector3', not 'table' or 'userdata'. Rejecting that type made every
+-- server-side GetEntityCoords read normalize to nil, which failed every zone
+-- and distance check.
 function Util.ToCoords(value)
-    if type(value) ~= 'table' and type(value) ~= 'userdata' then return nil end
+    local kind = type(value)
+    if kind ~= 'table' and kind ~= 'userdata' and kind ~= 'vector3' and kind ~= 'vector4' then return nil end
     local x, y, z = value.x, value.y, value.z
     if x == nil then x, y, z = value[1], value[2], value[3] end
     if not Util.IsFiniteNumber(x) or not Util.IsFiniteNumber(y) or not Util.IsFiniteNumber(z) then return nil end
@@ -123,6 +129,42 @@ function Util.Distance(a, b)
     if not left or not right then return nil end
     local dx, dy, dz = left.x - right.x, left.y - right.y, left.z - right.z
     return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
+-- Timestamp rendering without the os library, which does not exist in the
+-- client runtime (os.date there crashes with "attempt to index a nil value").
+-- Pure calendar math from a POSIX timestamp, UTC.
+local MONTHS = { 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec' }
+
+local function civilFrom(seconds)
+    local days = math.floor(seconds / 86400)
+    local rem = seconds % 86400
+    -- Howard Hinnant's civil-from-days algorithm.
+    local z = days + 719468
+    local era = math.floor(z / 146097)
+    local doe = z - era * 146097
+    local yoe = math.floor((doe - math.floor(doe / 1460) + math.floor(doe / 36524) - math.floor(doe / 146096)) / 365)
+    local doy = doe - (365 * yoe + math.floor(yoe / 4) - math.floor(yoe / 100))
+    local mp = math.floor((5 * doy + 2) / 153)
+    local day = doy - math.floor((153 * mp + 2) / 5) + 1
+    local month = mp < 10 and mp + 3 or mp - 9
+    return day, month, math.floor(rem / 3600), math.floor((rem % 3600) / 60)
+end
+
+-- '12 Mar 14:05'
+function Util.Stamp(seconds)
+    seconds = tonumber(seconds)
+    if not seconds or seconds <= 0 then return '' end
+    local day, month, hour, minute = civilFrom(math.floor(seconds))
+    return ('%d %s %02d:%02d'):format(day, MONTHS[month] or '?', hour, minute)
+end
+
+-- '14:05'
+function Util.StampClock(seconds)
+    seconds = tonumber(seconds)
+    if not seconds or seconds <= 0 then return '' end
+    local _, _, hour, minute = civilFrom(math.floor(seconds))
+    return ('%02d:%02d'):format(hour, minute)
 end
 
 -- Truncates free text before it is stored. Narratives and BOLO descriptions

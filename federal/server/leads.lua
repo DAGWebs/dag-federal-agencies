@@ -206,10 +206,44 @@ function Leads.Follow(source, leadId)
     return lead
 end
 
+-- A lead written by hand: a tip from an informant, something spotted on
+-- patrol - work that starts an investigation instead of falling out of one.
+function Leads.Manual(source, payload)
+    local membership = Core.Require(source, 'cad.write')
+    if not membership then return fail('not authorized') end
+    payload = type(payload) == 'table' and payload or {}
+
+    local kind = Const.LeadKinds[payload.kind] and payload.kind or 'contact'
+    local summary = Util.Text(payload.summary, 300)
+    if not summary then return fail('a lead needs a summary') end
+
+    local number, sequence = Core.NextNumber(membership.agency.id, 'lead')
+    local lead = {
+        id = Util.RecordId('led', sequence),
+        number = number,
+        agency = membership.agency.id,
+        calloutId = Util.Text(payload.calloutId, 40),
+        kind = kind,
+        status = 'open',
+        summary = summary,
+        subject = Util.Text(payload.subject, 80),
+        origin = Util.Text(payload.origin, 60),
+        enteredBy = membership.name,
+        createdAt = os.time()
+    }
+    leads.save(lead.id, lead)
+    return lead
+end
+
 -- Net wiring -------------------------------------------------------------------
 
 Bridge.RegisterCallback(Federal.Net('leads'), function(source, reply, calloutId)
     reply(Leads.For(source, calloutId))
+end)
+
+Bridge.RegisterCallback(Federal.Net('leads:create'), function(source, reply, payload)
+    local lead, message = Leads.Manual(source, payload)
+    reply(lead, message)
 end)
 
 Bridge.RegisterCallback(Federal.Net('leads:plate'), function(source, reply, plate)

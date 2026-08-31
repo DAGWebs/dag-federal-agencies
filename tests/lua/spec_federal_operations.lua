@@ -26,6 +26,38 @@ end
 
 local SAMPLE = { { slot = 11, drawable = 12, texture = 2 }, { slot = 4, drawable = 8, texture = 0 } }
 
+-- Checkout ledger ------------------------------------------------------------
+
+test('armory draws land on a checkout ledger, aggregated and clearable', function()
+    loadOps()
+    officer(1, 'fib', 2, 'armory')
+
+    assertTrue(DAG.Federal.Armory.Draw(1, 'radio') ~= nil)
+    assertTrue(DAG.Federal.Armory.Draw(1, 'radio') ~= nil)
+    assertTrue(DAG.Federal.Armory.Draw(1, 'handcuffs') ~= nil)
+
+    local kit = DAG.Federal.Armory.CheckoutFor('license:1')
+    assertEq(#kit.items, 2, 'the same item aggregates instead of stacking lines')
+    assertEq(kit.items[1].item, 'radio')
+    assertEq(kit.items[1].count, 2)
+
+    DAG.Federal.Armory.ClearCheckout('license:1')
+    assertNil(DAG.Federal.Armory.CheckoutFor('license:1'))
+end)
+
+test('drawing a motor pool vehicle records it on a callsign plate', function()
+    loadOps()
+    officer(1, 'fib', 3, 'garage')
+
+    local entry = DAG.Federal.Armory.RequestVehicle(1, 'fbi')
+    assertTrue(entry ~= nil, 'the stock fbi cruiser draws at grade 3')
+
+    local kit = DAG.Federal.Armory.CheckoutFor('license:1')
+    assertTrue(kit.vehicle ~= nil, 'the vehicle is on the ledger')
+    -- The plate is the callsign with punctuation stripped: FIB-1 -> FIB1.
+    assertEq(kit.vehicle.plate, 'FIB1')
+end)
+
 -- Uniforms -------------------------------------------------------------------
 
 test('a boss standing in the office can save a captured outfit as a uniform', function()
@@ -120,8 +152,9 @@ test('drawing an item requires the armory zone and the grade', function()
     assertEq(DAG.Federal.Armory.Draw(1, 'radio').item, 'radio')
     assertEq(DAG.Framework.GetItemCount(1, 'radio'), 1)
 
+    -- The refusal names the rank that unlocks the item.
     local _, gradeMessage = DAG.Federal.Armory.Draw(1, 'carbine')
-    assertEq(gradeMessage, 'your grade is not issued that item')
+    assertEq(gradeMessage, 'Requires Senior Special Agent')
 
     officer(1, 'fib', 3, 'duty')
     local _, placeMessage = DAG.Federal.Armory.Draw(1, 'radio')
@@ -287,14 +320,14 @@ test('fingerprinting puts a subject on file so the lab can match them later', fu
 
     local swab = DAG.Federal.Actions.SwabSubject(1, 2)
     harness.placePlayer(1, zoneCoords('fib', 'evidence'))
-    assertEq(DAG.Federal.CAD.AnalyseEvidence(1, swab.id).result, 'No match on file')
+    assertEq(DAG.Federal.CAD.AnalyseEvidence(1, swab.id).result, 'CODIS search returned no candidates on file')
 
     harness.placePlayer(1, zoneCoords('fib', 'duty'))
     assertTrue(DAG.Federal.Actions.Fingerprint(1, 2).record.printed)
 
     local second = DAG.Federal.Actions.SwabSubject(1, 2)
     harness.placePlayer(1, zoneCoords('fib', 'evidence'))
-    assertEq(DAG.Federal.CAD.AnalyseEvidence(1, second.id).result, 'Match: Civilian 2')
+    assertEq(DAG.Federal.CAD.AnalyseEvidence(1, second.id).result, 'CODIS hit: Civilian 2')
 end)
 
 test('an arrest requires restraint first', function()

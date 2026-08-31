@@ -80,6 +80,13 @@ function Bridge.Notify(message, kind, duration)
     kind, duration = kind or 'inform', duration or 5000
     if Config.Notify == 'chat' then return chatNotify(message) end
 
+    -- The bundled bottom-right toast, styled with the rest of the UI. Chosen
+    -- explicitly, so servers whose HUD covers the framework's notification
+    -- area can move this resource's messages out from under it.
+    if Config.Notify == 'nui' then
+        return SendNUIMessage({ action = 'notify', text = message, kind = kind, duration = duration })
+    end
+
     if (Config.Notify == 'auto' or Config.Notify == 'ox') and GetResourceState('ox_lib') == 'started' then
         return exports.ox_lib:notify({ description = message, type = kind, duration = duration })
     end

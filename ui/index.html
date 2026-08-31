@@ -29,33 +29,98 @@
     </div>
 
     <div id="mdt" class="mdt" hidden>
-        <div class="mdt__panel" role="dialog" aria-label="Mobile data terminal">
-            <header class="mdt__header">
-                <div class="mdt__identity">
+        <div class="mdt__app" role="dialog" aria-label="Computer aided dispatch">
+            <header class="mdt__top">
+                <div class="mdt__brand">
+                    <img class="mdt__logo" id="mdtLogo" alt="" hidden>
                     <span class="mdt__badge" id="mdtAgency">FED</span>
-                    <div>
-                        <div class="mdt__title" id="mdtTitle">Mobile data terminal</div>
+                    <div class="mdt__brandText">
+                        <div class="mdt__title" id="mdtTitle">Computer Aided Dispatch</div>
                         <div class="mdt__subtitle" id="mdtSubtitle"></div>
                     </div>
                 </div>
-                <button class="mdt__close" id="mdtClose" type="button" aria-label="Close">&times;</button>
+                <nav class="mdt__nav" id="mdtNav"></nav>
+                <div class="mdt__topRight">
+                    <span class="mdt__clock" id="mdtClock"></span>
+                    <button class="mdt__close" id="mdtClose" type="button" aria-label="Close">&times;</button>
+                </div>
             </header>
 
+            <div class="mdt__ribbon">
+                <span class="mdt__crumb" id="mdtCrumb">DISPATCH</span>
+                <div class="mdt__statusStrip" id="mdtStatusStrip"></div>
+                <span class="mdt__feed"><span class="mdt__mapLive"></span><span id="mdtStatus">Ready</span></span>
+            </div>
+
             <div class="mdt__body">
-                <nav class="mdt__tabs" id="mdtTabs" role="tablist"></nav>
-                <section class="mdt__content">
-                    <div class="mdt__toolbar" id="mdtToolbar" hidden>
-                        <input class="mdt__search" id="mdtSearch" type="text" placeholder="Search" autocomplete="off">
+                <!-- DISPATCH: the board a real terminal lands on. -->
+                <section class="mdt__dispatch" id="mdtDispatch" hidden>
+                    <div class="mdt__boards">
+                        <div class="mdt__board">
+                            <div class="mdt__boardHead">&#10038; ACTIVE CALLS <span class="mdt__boardCount" id="mdtCallCount">0</span></div>
+                            <div class="mdt__tableWrap">
+                                <table class="mdt__table">
+                                    <thead><tr><th>ID</th><th>CALL</th><th>PRIORITY</th><th>UNITS</th></tr></thead>
+                                    <tbody id="mdtCallsBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="mdt__board">
+                            <div class="mdt__boardHead">&#128101; ACTIVE UNITS <span class="mdt__boardCount" id="mdtUnitCount">0</span></div>
+                            <div class="mdt__tableWrap">
+                                <table class="mdt__table">
+                                    <thead><tr><th>UNIT</th><th>NAME</th><th>DIVISION</th><th>STATUS</th></tr></thead>
+                                    <tbody id="mdtUnitsBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
-                    <div class="mdt__split">
-                        <ul class="mdt__list" id="mdtList"></ul>
-                        <article class="mdt__detail" id="mdtDetail"></article>
-                    </div>
+                    <div class="mdt__map" id="mdtMap"></div>
                 </section>
+
+                <!-- LOOKUP: server-side record search console. -->
+                <section class="mdt__engine" id="mdtLookupView" hidden>
+                    <aside class="mdt__side">
+                        <div class="mdt__sideHead">&#128269; SEARCH</div>
+                        <div class="mdt__lookupForm">
+                            <label class="mdt__lookupLabel">NAME OR IDENTIFIER</label>
+                            <input class="mdt__search" id="mdtLookupTerm" type="text" autocomplete="off" placeholder="e.g. Sam Cole">
+                            <button type="button" class="mdt__go" id="mdtLookupGo">SEARCH &#128269;</button>
+                            <div class="mdt__sideNote">Searches citizen and NPC records on file with your agency, including subjects encountered on callouts.</div>
+                        </div>
+                    </aside>
+                    <div class="mdt__listWrap" id="mdtLookupList"></div>
+                    <article class="mdt__detail" id="mdtLookupDetail"></article>
+                </section>
+
+                <!-- RECORDS room: the filing cabinet. -->
+                <section class="mdt__engine" id="mdtRecordsView" hidden>
+                    <aside class="mdt__side">
+                        <div class="mdt__sideHead">&#128193; FILES</div>
+                        <nav class="mdt__tree" id="mdtTree"></nav>
+                    </aside>
+                    <div class="mdt__listWrap">
+                        <div class="mdt__toolbar" id="mdtToolbar">
+                            <input class="mdt__search" id="mdtSearch" type="text" placeholder="Filter" autocomplete="off">
+                            <div class="mdt__tabActions" id="mdtTabActions"></div>
+                        </div>
+                        <div class="mdt__filters" id="mdtFilters" hidden></div>
+                        <ul class="mdt__list" id="mdtList"></ul>
+                        <div class="mdt__pager" id="mdtPager" hidden>
+                            <button type="button" class="mdt__pageBtn" id="mdtPrev">&lsaquo;</button>
+                            <span class="mdt__pageInfo" id="mdtPageInfo"></span>
+                            <button type="button" class="mdt__pageBtn" id="mdtNext">&rsaquo;</button>
+                        </div>
+                    </div>
+                    <article class="mdt__detail" id="mdtDetail"></article>
+                </section>
+
+                <!-- MY CALL: the assigned call as a call viewer. -->
+                <section class="mdt__mycall" id="mdtMyCallView" hidden></section>
             </div>
 
             <footer class="mdt__footer">
-                <span id="mdtStatus">Ready</span>
+                <span id="mdtOfficer"></span>
                 <span class="mdt__hint"><kbd>Esc</kbd> Close</span>
             </footer>
         </div>
@@ -84,6 +149,76 @@
         <div class="progress__label" id="progressLabel">Working</div>
         <div class="progress__track"><span class="progress__fill" id="progressFill"></span></div>
         <div class="progress__hint" id="progressHint" hidden><kbd>X</kbd> Cancel</div>
+    </div>
+
+    <div id="cfg" class="cfg" hidden>
+        <div class="cfg__panel" role="dialog" aria-label="Agency configuration">
+            <header class="cfg__header">
+                <div class="cfg__identity">
+                    <span class="cfg__badge" id="cfgAgency">FED</span>
+                    <div>
+                        <div class="cfg__title" id="cfgTitle">Agency configuration</div>
+                        <div class="cfg__subtitle" id="cfgSubtitle"></div>
+                    </div>
+                </div>
+                <button class="cfg__close" id="cfgCloseBtn" type="button" aria-label="Close">&times;</button>
+            </header>
+
+            <div class="cfg__body">
+                <nav class="cfg__tabs" id="cfgTabs" role="tablist"></nav>
+                <div class="cfg__split">
+                    <ul class="cfg__list" id="cfgList"></ul>
+                    <div class="cfg__form" id="cfgForm"></div>
+                </div>
+            </div>
+
+            <footer class="cfg__footer">
+                <span>Edits apply to the live server config immediately</span>
+                <span class="cfg__hint"><kbd>Esc</kbd> Close</span>
+            </footer>
+        </div>
+        <datalist id="cfgItems"></datalist>
+    </div>
+
+    <div id="toasts" class="toasts"></div>
+
+    <div id="grid" class="grid" hidden>
+        <div class="grid__panel" role="dialog" aria-label="Equipment">
+            <header class="grid__header">
+                <div>
+                    <div class="grid__title" id="gridTitle">Armory</div>
+                    <div class="grid__subtitle" id="gridSubtitle"></div>
+                </div>
+                <button class="grid__close" id="gridClose" type="button" aria-label="Close">&times;</button>
+            </header>
+            <div class="grid__body" id="gridBody"></div>
+            <footer class="grid__footer">
+                <span id="gridHint">Click an item to draw it</span>
+                <span class="grid__esc"><kbd>Esc</kbd> Close</span>
+            </footer>
+        </div>
+    </div>
+
+    <div id="doorPrompt" class="doorPrompt" hidden>
+        <span class="doorPrompt__key">E</span>
+        <div class="doorPrompt__text">
+            <span class="doorPrompt__label" id="doorPromptLabel">Door</span>
+            <span class="doorPrompt__hint" id="doorPromptHint">Unlock</span>
+        </div>
+        <span class="doorPrompt__state" id="doorPromptState" data-locked="true">Locked</span>
+    </div>
+
+    <div id="dialog" class="dialog" hidden>
+        <form class="dialog__panel" id="dialogForm" novalidate>
+            <header class="dialog__header">
+                <h1 class="dialog__title" id="dialogTitle">Input</h1>
+            </header>
+            <div class="dialog__fields" id="dialogFields"></div>
+            <footer class="dialog__footer">
+                <button type="button" class="dialog__button" id="dialogCancel">Cancel</button>
+                <button type="submit" class="dialog__button dialog__button--primary">Confirm</button>
+            </footer>
+        </form>
     </div>
 
     <script src="app.js"></script>

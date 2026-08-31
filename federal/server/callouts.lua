@@ -65,7 +65,11 @@ local function normalizeTemplate(raw)
             label = Util.Text(stage.label, 90, Const.ObjectiveKinds[stage.kind]),
             radius = Util.Clamp(tonumber(stage.radius) or 25.0, 5.0, 200.0),
             count = math.floor(Util.Clamp(tonumber(stage.count) or 1, 1, 10)),
-            kinds = type(stage.kinds) == 'table' and stage.kinds or nil
+            kinds = type(stage.kinds) == 'table' and stage.kinds or nil,
+            -- A perimeter: an arrive stage that also demands this many
+            -- pieces of field equipment physically deployed at the scene.
+            deploy = tonumber(stage.deploy)
+                and math.floor(Util.Clamp(tonumber(stage.deploy), 1, 8)) or nil
         }
     end
 
@@ -74,12 +78,20 @@ local function normalizeTemplate(raw)
         if Util.IsSlug(agencyId) then agencies[#agencies + 1] = agencyId end
     end
 
+    -- Joint operations: supporting agencies see the callout, may attach, and
+    -- get the dispatch alert, while the case still belongs to the primary.
+    local support = {}
+    for _, agencyId in ipairs(type(raw.support) == 'table' and raw.support or {}) do
+        if Util.IsSlug(agencyId) then support[#support + 1] = agencyId end
+    end
+
     local suspect = type(raw.suspect) == 'table' and raw.suspect or {}
     return {
         id = raw.id,
         label = Util.Text(raw.label, 80, raw.id),
         description = Util.Text(raw.description, 400, ''),
         agencies = agencies,
+        support = support,
         priority = math.floor(Util.Clamp(tonumber(raw.priority) or 2, 1, 3)),
         blip = type(raw.blip) == 'table' and raw.blip or { sprite = 480, color = 5 },
         locations = locations,
@@ -183,6 +195,7 @@ local function publicView(callout)
         id = callout.id,
         number = callout.number,
         agency = callout.agency,
+        support = callout.support,
         template = callout.templateId,
         label = callout.label,
         description = callout.description,
@@ -212,9 +225,26 @@ end
 
 Callouts.PublicView = publicView
 
+-- Every agency working the case: the primary plus any supporting agencies.
+local function calloutAgencies(callout)
+    local list = { callout.agency }
+    for _, agencyId in ipairs(callout.support or {}) do
+        if agencyId ~= callout.agency then list[#list + 1] = agencyId end
+    end
+    return list
+end
+
+local function involves(callout, agencyId)
+    return callout.agency == agencyId or Util.Contains(callout.support or {}, agencyId)
+end
+
+Callouts.Involves = involves
+
 local function notify(callout, event, payload)
-    for _, playerSource in ipairs(Core.OnDutySources(callout.agency)) do
-        TriggerClientEvent(Federal.Net(event), playerSource, payload)
+    for _, agencyId in ipairs(calloutAgencies(callout)) do
+        for _, playerSource in ipairs(Core.OnDutySources(agencyId)) do
+            TriggerClientEvent(Federal.Net(event), playerSource, payload)
+        end
     end
 end
 
@@ -258,6 +288,7 @@ function Callouts.Dispatch(agencyId, templateId, locationIndex)
         id = Util.RecordId('cal', sequence),
         number = number,
         agency = agencyId,
+        support = Util.Copy(template.support or {}),
         templateId = template.id,
         label = template.label,
         description = template.description,
@@ -270,6 +301,8 @@ function Callouts.Dispatch(agencyId, templateId, locationIndex)
         evidence = template.evidence,
         witnesses = template.witnesses,
         incident = template.incident,
+        -- What ambient witnesses near this scene say when interviewed.
+        investigation = template.investigation,
         suspect = suspect,
         assigned = {},
         host = nil,
@@ -284,18 +317,21 @@ function Callouts.Dispatch(agencyId, templateId, locationIndex)
 
     -- Also through the dispatch layer, so a server running ps-dispatch or
     -- cd_dispatch gets the alert in the system its players already watch.
+    -- Joint operations alert every involved agency.
     if Federal.Dispatch then
-        Federal.Dispatch.Alert({
-            id = callout.id,
-            agency = agencyId,
-            title = callout.label,
-            message = callout.description,
-            coords = callout.location,
-            sprite = callout.blip and callout.blip.sprite or 480,
-            colour = callout.blip and callout.blip.color or 5,
-            priority = callout.priority,
-            code = callout.number
-        })
+        for _, involvedId in ipairs(calloutAgencies(callout)) do
+            Federal.Dispatch.Alert({
+                id = callout.id,
+                agency = involvedId,
+                title = callout.label,
+                message = callout.description,
+                coords = callout.location,
+                sprite = callout.blip and callout.blip.sprite or 480,
+                colour = callout.blip and callout.blip.color or 5,
+                priority = callout.priority,
+                code = callout.number
+            })
+        end
     end
 
     return publicView(callout)
@@ -311,7 +347,7 @@ function Callouts.Active(source)
 
     local list = {}
     for _, callout in pairs(active) do
-        if callout.agency == membership.agency.id and callout.status ~= 'closed' then
+        if involves(callout, membership.agency.id) and callout.status ~= 'closed' then
             list[#list + 1] = publicView(callout)
         end
     end
@@ -319,8 +355,46 @@ function Callouts.Active(source)
     return list
 end
 
+-- The active callout of `agencyId` whose scene is nearest to `coords`, for
+-- the investigation layer: interviews near a callout use ITS witness flow.
+function Callouts.NearestScene(agencyId, coords, radius)
+    if not coords then return nil end
+    local best, bestDistance
+    for _, callout in pairs(active) do
+        if involves(callout, agencyId) and callout.status ~= 'closed' and type(callout.location) == 'table' then
+            local distance = Util.Distance(coords, callout.location)
+            if distance and distance <= (radius or 60.0) and (not bestDistance or distance < bestDistance) then
+                best, bestDistance = callout, distance
+            end
+        end
+    end
+    return best
+end
+
+-- Formal witness statements taken at a callout scene before any incident is
+-- filed: they ride the callout and land in the court file on completion.
+function Callouts.AddStatement(calloutId, entry)
+    local callout = active[calloutId]
+    if not callout or type(entry) ~= 'table' then return false end
+    callout.statements = callout.statements or {}
+    if #callout.statements >= 12 then return false end
+    callout.statements[#callout.statements + 1] = entry
+    return true
+end
+
 local function isAssigned(callout, source)
     return Util.Contains(callout.assigned, source)
+end
+
+-- The number of the callout this unit is riding, for radio traffic
+-- ("show me en route to FIB-CAD-0022").
+function Callouts.AssignedNumber(source)
+    for _, callout in pairs(active) do
+        if callout.status ~= 'closed' and isAssigned(callout, source) then
+            return callout.number
+        end
+    end
+    return nil
 end
 
 Callouts.IsAssigned = isAssigned
@@ -333,7 +407,7 @@ function Callouts.Attach(source, calloutId)
 
     local callout = active[calloutId]
     if not callout or callout.status == 'closed' then return fail('that callout is no longer active') end
-    if callout.agency ~= membership.agency.id then return fail('that callout belongs to another agency') end
+    if not involves(callout, membership.agency.id) then return fail('that callout belongs to another agency') end
     if isAssigned(callout, source) then return fail('you are already assigned') end
 
     callout.assigned[#callout.assigned + 1] = source
@@ -379,6 +453,30 @@ local validators = {}
 
 validators.arrive = function(source, callout, stage)
     if not atScene(source, callout, stage.radius) then return false, 'you are not at the scene yet' end
+
+    -- A perimeter stage: the cordon has to physically exist. Deployed field
+    -- equipment (cones, barriers - the Field equipment menu) near the scene
+    -- is what counts, whoever put it out.
+    if stage.deploy then
+        local nearby = 0
+        for _, record in pairs((Federal.Equipment and Federal.Equipment.deployed) or {}) do
+            if record.agency == callout.agency and record.netId then
+                local entity = NetworkGetEntityFromNetworkId(record.netId)
+                if entity and entity ~= 0 and DoesEntityExist(entity) then
+                    local at = GetEntityCoords(entity)
+                    local distance = Util.Distance({ x = at.x, y = at.y, z = at.z }, callout.location)
+                    if distance and distance <= (stage.radius or 25.0) + 20.0 then
+                        nearby = nearby + 1
+                    end
+                end
+            end
+        end
+        if nearby < stage.deploy then
+            return false, ('set the perimeter: deploy %d more cone(s) or barrier(s) at the scene (Field equipment menu)')
+                :format(stage.deploy - nearby)
+        end
+    end
+
     return true
 end
 
@@ -582,6 +680,37 @@ function Callouts.Complete(source, calloutId)
         incident = CAD.incidents.get(incident.id) or incident
     end
 
+    -- An encountered NPC becomes a person on file: identified or arrested
+    -- suspects get a citizen record under their synthetic identity, so the
+    -- Records tab finds them later like anyone else the agency has met.
+    if callout.suspect and callout.suspect.kind == 'npc'
+        and (callout.identified or callout.flags.arrested) then
+        CAD.Note(('npc:%s'):format(callout.id),
+            callout.suspect.name or 'Unidentified subject',
+            ('Encountered during %s (%s)%s'):format(callout.label, callout.number,
+                callout.flags.arrested and ' - arrested at the scene' or ' - identified, not apprehended'))
+    end
+
+    -- An arrested NPC suspect goes all the way: the case is filed with the
+    -- court under a synthetic identity, the NPC judge and jury run it (the
+    -- defendant never appears, exactly like a no-show player), and a
+    -- conviction lands them in custody and on the record.
+    if incident and callout.flags.arrested
+        and callout.suspect and callout.suspect.kind == 'npc'
+        and Federal.Court and Federal.Court.Enabled()
+        and #(callout.incident and callout.incident.charges or {}) > 0 then
+        local defendant = callout.identified and callout.suspect.name or nil
+        local case = Federal.Court.File(source, {
+            identifier = ('npc:%s'):format(callout.id),
+            name = defendant or callout.suspect.name or 'John Doe',
+            charges = callout.incident.charges,
+            incidentId = incident.id
+        })
+        if case then
+            Bridge.Notify(source, ('Case %s filed against the suspect.'):format(case.number), 'inform')
+        end
+    end
+
     local reward = settings().reward or {}
     local amount = tonumber(reward.amount) or 0
     if amount > 0 then
@@ -625,19 +754,57 @@ function Callouts.Expire(nowSeconds)
     return removed
 end
 
+-- Players online who do NOT work for the agency: the population the
+-- director's civilianLimit gate counts. When the city is busy with real
+-- players, automatic NPC work stands down and lets real roleplay happen.
+function Callouts.CivilianCount(agency)
+    local count = 0
+    for _, playerId in ipairs(GetPlayers()) do
+        local playerSource = tonumber(playerId)
+        if playerSource then
+            local job = Bridge.GetJob(playerSource)
+            if not job or not Util.Contains(agency.jobs or {}, job.name) then
+                count = count + 1
+            end
+        end
+    end
+    return count
+end
+
+-- Whether AUTOMATIC dispatch is allowed for this agency right now, per the
+-- director's configuration. Forced callouts never come through here.
+local function autoAllowed(agency)
+    local gate = agency.npcCallouts or {}
+    if gate.enabled == false then return false end
+    local limit = tonumber(gate.civilianLimit) or 0
+    if limit > 0 and Callouts.CivilianCount(agency) >= limit then return false end
+    return true
+end
+
 -- One consideration pass: for every agency with enough officers on duty and
 -- room for another case, roll the configured chance.
+-- How many callouts may run at once for an agency: the director's per-agency
+-- cap (or the global one), never more than the street can actually work -
+-- one officer alone is never handed three scenes at a time.
+function Callouts.ActiveCap(agency, onDuty)
+    local gate = agency.npcCallouts or {}
+    local cap = tonumber(gate.maxActive) or 0
+    if cap <= 0 then cap = tonumber(settings().maxActive) or 3 end
+    local perOfficer = tonumber(settings().perOfficer) or 1
+    return math.min(cap, math.max(1, onDuty * perOfficer))
+end
+
 function Callouts.Tick()
     if settings().enabled == false then return 0 end
 
     local dispatched = 0
     local minUnits = tonumber(settings().minUnits) or 1
-    local maxActive = tonumber(settings().maxActive) or 3
     local chance = tonumber(settings().chance) or 0.5
 
     for _, agency in ipairs(Core.Agencies()) do
         local onDuty = #Core.OnDutySources(agency.id)
-        if agency.callouts ~= false and onDuty >= minUnits and Callouts.CountFor(agency.id) < maxActive then
+        if agency.callouts ~= false and autoAllowed(agency)
+            and onDuty >= minUnits and Callouts.CountFor(agency.id) < Callouts.ActiveCap(agency, onDuty) then
             if math.random() <= chance and Callouts.Dispatch(agency.id) then
                 dispatched = dispatched + 1
             end
@@ -646,10 +813,60 @@ function Callouts.Tick()
     return dispatched
 end
 
+-- A member pulling their own work: bypasses the civilian gate and the dice,
+-- keeps the concurrency cap, and is rate limited per player so "force" never
+-- becomes "spam".
+local forceCooldowns = {}
+
+function Callouts.Force(source, templateId)
+    local membership = Core.Require(source, 'actions.detain')
+    if not membership then return fail('not authorized') end
+    if membership.agency.callouts == false then return fail('your agency has callouts disabled') end
+
+    local maxActive = tonumber(settings().maxActive) or 3
+    if Callouts.CountFor(membership.agency.id) >= maxActive then
+        return fail('your agency already has its maximum active callouts')
+    end
+
+    local nowSeconds = os.time()
+    local last = forceCooldowns[membership.identifier]
+    if last and (nowSeconds - last) < 300 then
+        return fail(('wait %d more second(s) before requesting another callout'):format(300 - (nowSeconds - last)))
+    end
+
+    local callout, message = Callouts.Dispatch(membership.agency.id, templateId)
+    if not callout then return fail(message) end
+
+    forceCooldowns[membership.identifier] = nowSeconds
+    return callout
+end
+
 -- Net wiring --------------------------------------------------------------------------
 
 Bridge.RegisterCallback(Federal.Net('callouts'), function(source, reply)
     reply(Callouts.Active(source))
+end)
+
+-- What a member may force: their agency's templates, for the request menu.
+Bridge.RegisterCallback(Federal.Net('callout:templates'), function(source, reply)
+    local membership = Core.Membership(source)
+    if not membership then return reply({}) end
+    local list = {}
+    for _, template in ipairs(Callouts.TemplatesFor(membership.agency.id)) do
+        list[#list + 1] = {
+            id = template.id,
+            label = template.label,
+            description = template.description,
+            priority = template.priority
+        }
+    end
+    reply(list)
+end)
+
+Bridge.RegisterCallback(Federal.Net('callout:force'), function(source, reply, templateId)
+    local callout, message = Callouts.Force(source, type(templateId) == 'string' and templateId or nil)
+    if not callout then Bridge.Notify(source, message, 'error') end
+    reply(callout, message)
 end)
 
 Bridge.RegisterCallback(Federal.Net('callout:attach'), function(source, reply, calloutId)

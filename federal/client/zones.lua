@@ -71,6 +71,11 @@ local function registerZone(agency, station, zone)
         canInteract = function()
             local membership = State.Membership()
             if not membership or membership.agencyId ~= agency.id then return false end
+            -- Off duty, the sign-in desk is the only room that answers:
+            -- everything else waits until the officer clocks on.
+            if zone.kind ~= 'duty' and not State.OnDuty() and not State.Context().admin then
+                return false
+            end
             return State.Grade() >= (zone.minGrade or 0)
         end,
         onSelect = function()
@@ -97,8 +102,23 @@ function Zones.Rebuild()
         local mine = membership ~= nil and membership.agencyId == agency.id
 
         for _, station in ipairs(agency.stations or {}) do
-            if settings.blips ~= false then
-                addBlip(station.coords, ('%s - %s'):format(agency.short, station.label), station.blip or agency.blip)
+            -- A station marked non-public only appears on members' maps; an
+            -- HQ reads as one on everybody else's.
+            local visible = station.publicBlip ~= false or mine
+            if settings.blips ~= false and visible then
+                local label = station.kind == 'hq'
+                    and ('%s HQ - %s'):format(agency.short, station.label)
+                    or ('%s - %s'):format(agency.short, station.label)
+                local spec = station.blip or agency.blip
+                if station.kind == 'hq' then
+                    spec = spec and (function()
+                        local copy = {}
+                        for key, value in pairs(spec) do copy[key] = value end
+                        copy.scale = (copy.scale or 0.85) * 1.2
+                        return copy
+                    end)() or { scale = 1.0 }
+                end
+                addBlip(station.coords, label, spec)
             end
             -- Only your own agency's rooms are interactive; another agency's
             -- armory is not yours to open.

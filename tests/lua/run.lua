@@ -68,6 +68,7 @@ local specs = {
     'tests/lua/spec_menu.lua',
     'tests/lua/spec_interactions.lua',
     'tests/lua/spec_federal_core.lua',
+    'tests/lua/spec_federal_callsigns.lua',
     'tests/lua/spec_federal_cad.lua',
     'tests/lua/spec_federal_operations.lua',
     'tests/lua/spec_federal_editor.lua',

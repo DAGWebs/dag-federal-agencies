@@ -121,7 +121,9 @@ test('clocking on records a unit and clocking off removes it', function()
     assertTrue(DAG.Federal.Core.SetDuty(1, true, 'fib-tower', 'ALPHA-1'))
 
     local unit = DAG.Federal.Core.Unit(1)
-    assertEq(unit.callsign, 'ALPHA-1')
+    -- The typed callsign is ignored: clock-in hands out the member's ASSIGNED
+    -- callsign (agency prefix + stored suffix), never a per-session number.
+    assertEq(unit.callsign, 'FIB-1')
     assertEq(unit.station, 'fib-tower')
     assertEq(unit.status, 'available')
     assertEq(#DAG.Federal.Core.Units('fib'), 1)
